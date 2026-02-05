@@ -2,6 +2,9 @@
 
 Interactive web components for microscopy education, designed to be embedded in Moodle lessons.
 
+See them live at: http://talleylambert.com/micro-active/
+
+
 ## Structure
 
 Each component lives in its own directory under `components/`:
