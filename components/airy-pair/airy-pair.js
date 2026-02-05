@@ -4,9 +4,9 @@ import { LitElement, html, css } from 'https://cdn.jsdelivr.net/gh/lit/dist@3/co
  * A web component that displays an interactive Airy disk pattern
  * demonstrating diffraction-limited resolution in microscopy.
  *
- * @element gaussian-profile
+ * @element airy-pair
  */
-class GaussianProfile extends LitElement {
+class AiryPair extends LitElement {
   static properties = {
     // Parameter values
     na: { type: Number },
@@ -976,4 +976,4 @@ class GaussianProfile extends LitElement {
   }
 }
 
-customElements.define('gaussian-profile', GaussianProfile);
+customElements.define('airy-pair', AiryPair);

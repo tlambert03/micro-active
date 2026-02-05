@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Diffraction Slit - Demo</title>
+  <title>Airy Pair - Demo</title>
   <script>
     MathJax = {
       tex: { inlineMath: [['$', '$']] },
@@ -43,7 +43,7 @@
 
     .demo-container {
       width: 100%;
-      max-width: 900px;
+      max-width: 1000px;
     }
 
     .info-box {
@@ -114,68 +114,61 @@
 </head>
 <body>
   <div class="header">
-    <h1>Diffraction &amp; Focusing</h1>
-    <p>Interactive Huygens-Fresnel wavelet simulation</p>
+    <h1>Airy Disk Pattern</h1>
+    <p>Interactive visualization of diffraction-limited resolution</p>
   </div>
 
   <div class="demo-container">
-    <diffraction-slit></diffraction-slit>
+    <airy-pair></airy-pair>
 
     <div class="info-box">
       <h3>About This Simulation</h3>
       <p>
-        This component visualizes <strong>diffraction</strong> of a plane wave
-        passing through one or two narrow slits&mdash;or focusing through a thin
-        lens&mdash;computed using the <strong>Huygens-Fresnel principle</strong>.
-        Every point within each opening acts as a source of a secondary
-        cylindrical wavelet. The observed pattern is the coherent superposition
-        of all these wavelets.
+        This component demonstrates the <strong>Airy disk</strong>, the
+        diffraction pattern produced when light from a point source passes
+        through a circular aperture (like a microscope objective). Two point
+        sources are shown so you can explore how well they can be
+        <strong>resolved</strong> as a function of NA and wavelength.
       </p>
 
       <div class="formula">
-        $$U(x,y) = \sum_s \frac{\Delta y}{r^{3/2}}\, e^{ikr}\, \Delta x'$$
+        $$I(r) = I_0 \left[\frac{2\,J_1(x)}{x}\right]^2
+        \qquad x = \frac{2\pi}{\lambda}\,\text{NA}\,r$$
       </div>
 
       <dl>
-        <dt>$k$</dt>             <dd>$= 2\pi/\lambda$ &mdash; wavenumber</dd>
-        <dt>$r$</dt>             <dd>= distance from source point to observation point</dd>
-        <dt>$\Delta y / r$</dt>  <dd>&mdash; obliquity factor (suppresses backward radiation)</dd>
+        <dt>$J_1$</dt>         <dd>Bessel function of the first kind, order 1</dd>
+        <dt>$\lambda$</dt>     <dd>Wavelength of light</dd>
+        <dt>NA</dt>            <dd>Numerical aperture of the objective</dd>
+        <dt>$r$</dt>           <dd>Radial distance from center</dd>
       </dl>
 
-      <h3>Display Modes</h3>
+      <h3>Resolution Criteria</h3>
       <dl>
-        <dt>Wave</dt>
-        <dd>Instantaneous real part of the field as grayscale
-            (white&nbsp;= peak, black&nbsp;= trough, gray&nbsp;= zero).</dd>
-        <dt>Wavelets</dt>
-        <dd>Individual Huygens wavelets shown as concentric arcs
-            emanating from selected source points.</dd>
-        <dt>Wavefronts</dt>
-        <dd>Only wave crests drawn as bright traveling lines,
-            fading where amplitude is low.</dd>
+        <dt>Rayleigh</dt>
+        <dd>Two points are just resolvable when the center of one Airy
+            disk falls on the first minimum of the other:
+            $d = 0.61\,\lambda/\text{NA}$.</dd>
+        <dt>Abbe</dt>
+        <dd>Theoretical diffraction limit:
+            $d = \lambda/(2\,\text{NA})$.</dd>
+        <dt>Sparrow</dt>
+        <dd>Combined profile becomes flat at the midpoint:
+            $d \approx 0.47\,\lambda/\text{NA}$.</dd>
       </dl>
-
-      <h3>Key Physics</h3>
-      <dl>
-        <dt>Single slit</dt>
-        <dd>Central maximum widens as slit width decreases.
-            First minimum at $\sin\theta = \lambda/a$.</dd>
-        <dt>Double slit</dt>
-        <dd>Rapid $\cos^2$ interference fringes modulated by the single-slit
-            envelope. Fringe spacing $\lambda L/d$.</dd>
-        <dt>Lens</dt>
-        <dd>Quadratic phase $\phi(x') = -k\,x'^2/(2f)$
-            causes wavelets to converge at the focal plane.
-            Airy disk first minimum at $0.61\,\lambda/\text{NA}$.</dd>
-      </dl>
+      <p>
+        Adjust NA and wavelength to see how they affect the Airy disk width
+        and the resolution limits. Use the criterion buttons to snap the
+        separation to each limit.
+      </p>
 
       <h3>Using in Moodle</h3>
       <p>To embed this component in a Moodle lesson, add the following HTML:</p>
-      <pre><code>&lt;script type="module" src="path/to/diffraction-slit.js"&gt;&lt;/script&gt;
-&lt;diffraction-slit&gt;&lt;/diffraction-slit&gt;</code></pre>
+      <pre><code>&lt;script type="module" src="path/to/airy-pair.js"&gt;&lt;/script&gt;
+&lt;airy-pair&gt;&lt;/airy-pair&gt;</code></pre>
     </div>
   </div>
 
-  <script type="module" src="./diffraction-slit.js"></script>
+  <script type="module" src="./airy-pair.js"></script>
 </body>
 </html>

@@ -13,108 +13,117 @@
 
     body {
       font-family: system-ui, -apple-system, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: linear-gradient(135deg, #1a1a3e 0%, #0d0d2b 100%);
       min-height: 100vh;
       padding: 40px 20px;
     }
 
     .container {
-      max-width: 1000px;
+      max-width: 900px;
       margin: 0 auto;
     }
 
     header {
       text-align: center;
       color: white;
-      margin-bottom: 50px;
+      margin-bottom: 40px;
     }
 
     h1 {
-      font-size: 3em;
-      margin-bottom: 10px;
-      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      font-size: 2.5em;
+      margin-bottom: 8px;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
     }
 
     .subtitle {
-      font-size: 1.2em;
-      opacity: 0.9;
+      font-size: 1.1em;
+      opacity: 0.8;
+    }
+
+    .section {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .section h2 {
+      color: #333;
+      font-size: 1.1em;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #e0e0e0;
+      padding-bottom: 4px;
+    }
+
+    .section p {
+      color: #555;
+      line-height: 1.7;
+      font-size: 0.95em;
+      margin-bottom: 8px;
+    }
+
+    .section ol {
+      margin: 8px 0 0 20px;
+      color: #555;
+      font-size: 0.95em;
+      line-height: 1.7;
+    }
+
+    .section li {
+      margin: 4px 0;
     }
 
     .components-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 25px;
-      margin-top: 30px;
+      gap: 20px;
+      margin-bottom: 20px;
     }
 
     .component-card {
-      background: white;
-      border-radius: 12px;
-      padding: 25px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 8px;
+      padding: 20px 20px 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
       transition: transform 0.2s, box-shadow 0.2s;
       text-decoration: none;
       color: inherit;
-      display: block;
+      display: flex;
+      flex-direction: column;
     }
 
     .component-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
     }
 
     .component-card h2 {
       color: #667eea;
-      margin-bottom: 12px;
-      font-size: 1.5em;
+      margin-bottom: 8px;
+      font-size: 1.2em;
     }
 
     .component-card p {
       color: #555;
       line-height: 1.6;
-      margin-bottom: 15px;
+      font-size: 0.93em;
+      flex: 1;
     }
 
-    .component-card .tags {
+    .tags {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       flex-wrap: wrap;
+      margin-top: 12px;
     }
 
     .tag {
-      background: #f0f0f0;
-      padding: 4px 10px;
-      border-radius: 12px;
-      font-size: 0.85em;
-      color: #666;
-    }
-
-    .info-section {
-      background: rgba(255, 255, 255, 0.95);
-      border-radius: 12px;
-      padding: 30px;
-      margin-bottom: 30px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    }
-
-    .info-section h2 {
-      color: #333;
-      margin-bottom: 15px;
-    }
-
-    .info-section p {
-      color: #555;
-      line-height: 1.6;
-      margin-bottom: 10px;
-    }
-
-    .info-section ul {
-      margin-left: 20px;
-      color: #555;
-    }
-
-    .info-section li {
-      margin: 8px 0;
+      background: #eef;
+      padding: 3px 10px;
+      border-radius: 10px;
+      font-size: 0.82em;
+      color: #556;
     }
 
     code {
@@ -124,51 +133,62 @@
       font-family: 'Courier New', monospace;
       font-size: 0.9em;
     }
+
+    pre {
+      background: #f5f5f5;
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin: 8px 0 0;
+      overflow-x: auto;
+      border-left: 3px solid #667eea;
+    }
+
+    pre code {
+      background: none;
+      padding: 0;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>🔬 Micro-Active</h1>
+      <h1>Micro-Active</h1>
       <p class="subtitle">Interactive Web Components for Microscopy Education</p>
     </header>
 
-    <div class="info-section">
+    <div class="section">
       <h2>About</h2>
       <p>
-        This collection contains interactive web components designed to help students
-        understand concepts in microscopy. Each component is self-contained and can be
-        embedded in Moodle lessons or used in any web page.
+        Interactive web components designed to help students understand concepts
+        in microscopy. Each component is self-contained and can be embedded in
+        Moodle lessons or used in any web page.
       </p>
       <p>
-        <strong>Built with:</strong> Lit.js, Chart.js, and Shoelace (Web Awesome)
+        <strong>Built with:</strong> Lit.js, Chart.js, and Shoelace
       </p>
-    </div>
-
-    <div class="info-section">
-      <h2>Available Components</h2>
     </div>
 
     <div class="components-grid">
-      <a href="components/gaussian-profile/demo.html" class="component-card">
-        <h2>Gaussian Profile</h2>
+      <a href="components/airy-pair/demo.html" class="component-card">
+        <h2>Airy Pair</h2>
         <p>
-          Interactive visualization of a Gaussian distribution with adjustable width.
-          Demonstrates the point spread function (PSF) concept in optical microscopy.
+          Two overlapping Airy disk patterns with adjustable NA, wavelength,
+          pixelation, and noise. Includes Rayleigh, Abbe, and Sparrow
+          resolution criteria.
         </p>
         <div class="tags">
           <span class="tag">PSF</span>
           <span class="tag">Resolution</span>
-          <span class="tag">Optics</span>
+          <span class="tag">Airy Disk</span>
         </div>
       </a>
 
       <a href="components/diffraction-slit/demo.html" class="component-card">
         <h2>Diffraction &amp; Focusing</h2>
         <p>
-          Animated simulation of plane wave diffraction through single or double slits,
-          or focusing through a lens aperture. Computed via Huygens-Fresnel wavelet
-          summation with three visualization modes.
+          Plane wave diffraction through single or double slits, or focusing
+          through a lens aperture. Huygens-Fresnel wavelet summation with
+          three visualization modes.
         </p>
         <div class="tags">
           <span class="tag">Diffraction</span>
@@ -178,14 +198,14 @@
       </a>
     </div>
 
-    <div class="info-section">
+    <div class="section">
       <h2>Usage in Moodle</h2>
       <p>To embed any component in a Moodle lesson:</p>
       <ol>
         <li>Upload the component's <code>.js</code> file to your Moodle files</li>
         <li>In your lesson, add an HTML block</li>
         <li>Insert the following code:
-          <pre style="background: #f5f5f5; padding: 15px; border-radius: 6px; margin: 10px 0; overflow-x: auto;"><code>&lt;script type="module" src="/path/to/component.js"&gt;&lt;/script&gt;
+          <pre><code>&lt;script type="module" src="/path/to/component.js"&gt;&lt;/script&gt;
 &lt;component-name&gt;&lt;/component-name&gt;</code></pre>
         </li>
       </ol>
