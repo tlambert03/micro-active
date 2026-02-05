@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diffraction Slit - Demo</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: linear-gradient(135deg, #1a1a3e 0%, #0d0d2b 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    .header {
+      color: white;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      margin: 0 0 10px 0;
+      font-size: 2.5em;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .header p {
+      margin: 0;
+      font-size: 1.1em;
+      opacity: 0.8;
+    }
+
+    .demo-container {
+      width: 100%;
+      max-width: 900px;
+    }
+
+    .info-box {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .info-box h3 {
+      margin: 0 0 10px 0;
+      color: #333;
+    }
+
+    .info-box p {
+      margin: 5px 0;
+      color: #555;
+      line-height: 1.6;
+    }
+
+    .formula {
+      background: #f5f5f5;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 15px 0;
+      font-family: 'Courier New', monospace;
+      text-align: center;
+      font-size: 1.05em;
+    }
+
+    code {
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Diffraction Through Slits</h1>
+    <p>Interactive Huygens-Fresnel wavelet simulation</p>
+  </div>
+
+  <div class="demo-container">
+    <diffraction-slit></diffraction-slit>
+
+    <div class="info-box">
+      <h3>About This Simulation</h3>
+      <p>
+        This component visualizes <strong>diffraction</strong> of a plane wave
+        passing through one or two narrow slits, computed using the
+        <strong>Huygens-Fresnel principle</strong>. Every point within each slit
+        opening acts as a source of a secondary cylindrical wavelet. The
+        observed pattern is the coherent superposition of all these wavelets.
+      </p>
+
+      <div class="formula">
+        U(x, y) = &sum; (dy / r) &middot; exp(ikr) / &radic;r &middot; &Delta;x'
+      </div>
+
+      <p>
+        <strong>k</strong> = 2&pi;/&lambda; &mdash; wavenumber<br>
+        <strong>r</strong> = distance from each source point to the observation point<br>
+        <strong>dy/r</strong> &mdash; obliquity factor (suppresses backward radiation)
+      </p>
+
+      <h3>Display Modes</h3>
+      <p>
+        <strong>Wave</strong>: Shows the instantaneous real part of the field as
+        grayscale (white = positive peak, black = negative trough, gray = zero).
+      </p>
+      <p>
+        <strong>Wavelets</strong>: Highlights individual Huygens wavelets as
+        concentric arcs emanating from selected source points within the slit(s).
+      </p>
+      <p>
+        <strong>Wavefronts</strong>: Draws only the crests of the wave as
+        bright traveling lines, fading where amplitude is low.
+      </p>
+
+      <h3>Key Physics</h3>
+      <p>
+        <strong>Single slit</strong>: The central maximum widens as slit width
+        decreases. First minimum at sin&theta; = &lambda;/a.
+      </p>
+      <p>
+        <strong>Double slit</strong>: Rapid cos&sup2; interference fringes are
+        modulated by the single-slit diffraction envelope. Fringe spacing is
+        &lambda;L/d where L is the screen distance and d is slit separation.
+      </p>
+
+      <h3>Using in Moodle</h3>
+      <p>To embed this component in a Moodle lesson, add the following HTML:</p>
+      <pre><code>&lt;script type="module" src="path/to/diffraction-slit.js"&gt;&lt;/script&gt;
+&lt;diffraction-slit&gt;&lt;/diffraction-slit&gt;</code></pre>
+    </div>
+  </div>
+
+  <script type="module" src="./diffraction-slit.js"></script>
+</body>
+</html>
