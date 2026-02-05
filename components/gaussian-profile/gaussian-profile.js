@@ -8,13 +8,28 @@ import { LitElement, html, css } from 'https://cdn.jsdelivr.net/gh/lit/dist@3/co
  */
 class GaussianProfile extends LitElement {
   static properties = {
+    // Parameter values
     na: { type: Number },
     wavelength: { type: Number },
     distance: { type: Number },
     pixelSize: { type: Number },
     pixelOffset: { type: Number },
     noiseLevel: { type: Number },
-    isPlaying: { type: Boolean }
+    gammaScale: { type: Number },
+    isPlaying: { type: Boolean },
+
+    // Visibility toggles
+    showNa: { type: Boolean, attribute: 'show-na' },
+    showWavelength: { type: Boolean, attribute: 'show-wavelength' },
+    showDistance: { type: Boolean, attribute: 'show-distance' },
+    showPixelSize: { type: Boolean, attribute: 'show-pixel-size' },
+    showPixelOffset: { type: Boolean, attribute: 'show-pixel-offset' },
+    showNoiseLevel: { type: Boolean, attribute: 'show-noise-level' },
+    showGammaSlider: { type: Boolean, attribute: 'show-gamma-slider' },
+    showPlayButton: { type: Boolean, attribute: 'show-play-button' },
+    showCriterionButtons: { type: Boolean, attribute: 'show-criterion-buttons' },
+    showNyquistButton: { type: Boolean, attribute: 'show-nyquist-button' },
+    showInfoBox: { type: Boolean, attribute: 'show-info-box' }
   };
 
   static styles = css`
@@ -171,25 +186,74 @@ class GaussianProfile extends LitElement {
     }
 
     .chart-container {
-      position: relative;
+      display: flex;
       height: 450px;
       margin-top: 20px;
+      gap: 10px;
+    }
+
+    .canvas-wrapper {
+      flex: 1;
+      position: relative;
     }
 
     canvas {
-      max-height: 100%;
+      width: 100%;
+      height: 100%;
+    }
+
+    .gamma-slider-container {
+      width: 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .vertical-slider-wrapper {
+      position: relative;
+      width: 350px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .vertical-slider-wrapper sl-range {
+      position: absolute;
+      width: 350px;
+      transform: rotate(-90deg);
+      transform-origin: center center;
+      --track-width: 3px;
+      --thumb-size: 14px;
     }
   `;
 
   constructor() {
     super();
-    this.na = 1.0;           // Numerical aperture
-    this.wavelength = 550;    // Wavelength in nanometers
-    this.distance = 0.5;      // Distance between objects in micrometers
-    this.pixelSize = 0;       // Pixel size in micrometers (0 = continuous)
-    this.pixelOffset = 0;     // Pixel grid offset in micrometers
-    this.noiseLevel = 0;      // RMS noise level
-    this.isPlaying = false;   // Animation state
+    // Default parameter values
+    this.na = 1.0;
+    this.wavelength = 550;
+    this.distance = 0.5;
+    this.pixelSize = 0;
+    this.pixelOffset = 0;
+    this.noiseLevel = 0;
+    this.isPlaying = false;
+    this.gammaScale = 1.0;
+
+    // Default visibility (show everything)
+    this.showNa = true;
+    this.showWavelength = true;
+    this.showDistance = true;
+    this.showPixelSize = true;
+    this.showPixelOffset = true;
+    this.showNoiseLevel = true;
+    this.showGammaSlider = true;
+    this.showPlayButton = true;
+    this.showCriterionButtons = true;
+    this.showNyquistButton = true;
+    this.showInfoBox = true;
+
     this.chart = null;
     this.animationInterval = null;
   }
@@ -621,6 +685,45 @@ class GaussianProfile extends LitElement {
     this.updateChart();
   }
 
+  /**
+   * Apply logarithmic transformation to enhance dynamic range
+   * Preserves sign for negative values and keeps zeros at zero
+   */
+  applyGamma(value) {
+    if (this.gammaScale === 1.0) return value;
+
+    // Use log transformation instead of power law
+    // Scale factor increases as gamma decreases (more compression)
+    const scale = (1.0 - this.gammaScale) * 50; // 0 to ~40
+
+    const sign = value >= 0 ? 1 : -1;
+    const absVal = Math.abs(value);
+
+    // Log transform: log(1 + x*scale) / log(1 + scale)
+    // This compresses high values while keeping zeros at zero
+    if (scale === 0) return value;
+
+    const transformed = Math.log(1 + absVal * scale) / Math.log(1 + scale);
+    return sign * transformed;
+  }
+
+  /**
+   * Apply gamma transformation to dataset
+   */
+  transformDataset(data) {
+    return data.map(point => ({
+      x: point.x,
+      y: this.applyGamma(point.y)
+    }));
+  }
+
+  handleGammaChange(e) {
+    // Invert slider so up = enhance, down = linear
+    const sliderValue = parseFloat(e.target.value);
+    this.gammaScale = 1.2 - sliderValue; // Maps 0.2→1.0, 1.0→0.2
+    this.updateChart();
+  }
+
   updateChart() {
     if (!this.chart) return;
 
@@ -636,12 +739,18 @@ class GaussianProfile extends LitElement {
       this.noiseLevel
     );
 
-    this.chart.data.datasets[0].data = data1;
-    this.chart.data.datasets[1].data = data2;
-    this.chart.data.datasets[2].data = dataSum;
+    // Apply gamma transformation to all datasets
+    this.chart.data.datasets[0].data = this.transformDataset(data1);
+    this.chart.data.datasets[1].data = this.transformDataset(data2);
+    this.chart.data.datasets[2].data = this.transformDataset(dataSum);
     this.chart.data.datasets[2].hidden = this.pixelSize > 0;
-    this.chart.data.datasets[3].data = discretizedData;
+    this.chart.data.datasets[3].data = this.transformDataset(discretizedData);
     this.chart.data.datasets[3].hidden = this.pixelSize === 0;
+
+    // Keep y-axis range FIXED so y=0 doesn't move
+    this.chart.options.scales.y.max = 2.0;
+    this.chart.options.scales.y.min = -0.4;
+
     this.chart.update();
   }
 
@@ -660,133 +769,171 @@ class GaussianProfile extends LitElement {
       <div class="container">
         <h2>Airy Disk Pattern</h2>
 
-        <div class="info-box">
-          <p>
-            <strong>Rayleigh Criterion:</strong> ${this.getRayleighCriterion()} μm |
-            <strong>Abbe Limit:</strong> ${this.getAbbeDiffraction()} μm
-          </p>
-          <div class="sampling-info">
+        ${this.showInfoBox ? html`
+          <div class="info-box">
             <p>
-              <strong>Sampling Rate:</strong> ${this.getSamplingRate()}${this.pixelSize > 0 ? ' px/Airy' : ''}
+              <strong>Rayleigh Criterion:</strong> ${this.getRayleighCriterion()} μm |
+              <strong>Abbe Limit:</strong> ${this.getAbbeDiffraction()} μm
             </p>
-            <button
-              class="nyquist-button"
-              @click="${this.setNyquistSampling}"
-            >
-              Nyquist
-            </button>
+            <div class="sampling-info">
+              <p>
+                <strong>Sampling Rate:</strong> ${this.getSamplingRate()}${this.pixelSize > 0 ? ' px/Airy' : ''}
+              </p>
+              ${this.showNyquistButton ? html`
+                <button
+                  class="nyquist-button"
+                  @click="${this.setNyquistSampling}"
+                >
+                  Nyquist
+                </button>
+              ` : ''}
+            </div>
           </div>
-        </div>
+        ` : ''}
 
         <div class="controls">
-          <div class="control-group">
-            <label for="na">Numerical Aperture:</label>
-            <sl-range
-              id="na"
-              min="0.1"
-              max="1.4"
-              step="0.05"
-              value="${this.na}"
-              @sl-input="${this.handleNAChange}"
-            ></sl-range>
-            <span class="value-display">${this.na.toFixed(2)}</span>
-          </div>
+          ${this.showNa ? html`
+            <div class="control-group">
+              <label for="na">Numerical Aperture:</label>
+              <sl-range
+                id="na"
+                min="0.1"
+                max="1.4"
+                step="0.05"
+                value="${this.na}"
+                @sl-input="${this.handleNAChange}"
+              ></sl-range>
+              <span class="value-display">${this.na.toFixed(2)}</span>
+            </div>
+          ` : ''}
 
-          <div class="control-group">
-            <label for="wavelength">Wavelength (nm):</label>
-            <sl-range
-              id="wavelength"
-              min="400"
-              max="700"
-              step="10"
-              value="${this.wavelength}"
-              @sl-input="${this.handleWavelengthChange}"
-            ></sl-range>
-            <span class="value-display">${this.wavelength} nm</span>
-          </div>
+          ${this.showWavelength ? html`
+            <div class="control-group">
+              <label for="wavelength">Wavelength (nm):</label>
+              <sl-range
+                id="wavelength"
+                min="400"
+                max="700"
+                step="10"
+                value="${this.wavelength}"
+                @sl-input="${this.handleWavelengthChange}"
+              ></sl-range>
+              <span class="value-display">${this.wavelength} nm</span>
+            </div>
+          ` : ''}
 
-          <div class="control-group">
-            <label for="distance">Separation (μm):</label>
-            <sl-range
-              id="distance"
-              min="0"
-              max="2.0"
-              step="0.01"
-              value="${this.distance}"
-              @sl-input="${this.handleDistanceChange}"
-            ></sl-range>
-            <span class="value-display">${this.distance.toFixed(2)} μm</span>
-          </div>
+          ${this.showDistance ? html`
+            <div class="control-group">
+              <label for="distance">Separation (μm):</label>
+              <sl-range
+                id="distance"
+                min="0"
+                max="2.0"
+                step="0.01"
+                value="${this.distance}"
+                @sl-input="${this.handleDistanceChange}"
+              ></sl-range>
+              <span class="value-display">${this.distance.toFixed(2)} μm</span>
+            </div>
+          ` : ''}
 
-          <div class="control-group">
-            <label for="pixelSize">Pixel Size (μm):</label>
-            <sl-range
-              id="pixelSize"
-              min="0"
-              max="1.0"
-              step="0.01"
-              value="${this.pixelSize}"
-              @sl-input="${this.handlePixelSizeChange}"
-            ></sl-range>
-            <span class="value-display">${this.pixelSize.toFixed(2)} μm</span>
-          </div>
+          ${this.showPixelSize ? html`
+            <div class="control-group">
+              <label for="pixelSize">Pixel Size (μm):</label>
+              <sl-range
+                id="pixelSize"
+                min="0"
+                max="1.0"
+                step="0.01"
+                value="${this.pixelSize}"
+                @sl-input="${this.handlePixelSizeChange}"
+              ></sl-range>
+              <span class="value-display">${this.pixelSize.toFixed(2)} μm</span>
+            </div>
+          ` : ''}
 
-          <div class="control-group">
-            <label for="pixelOffset">Pixel Offset (μm):</label>
-            <sl-range
-              id="pixelOffset"
-              min="0"
-              max="${this.pixelSize > 0 ? (this.pixelSize / 2).toFixed(3) : 0.5}"
-              step="0.001"
-              value="${this.pixelOffset}"
-              @sl-input="${this.handlePixelOffsetChange}"
-            ></sl-range>
-            <span class="value-display">${this.pixelOffset.toFixed(3)} μm</span>
-          </div>
+          ${this.showPixelOffset ? html`
+            <div class="control-group">
+              <label for="pixelOffset">Pixel Offset (μm):</label>
+              <sl-range
+                id="pixelOffset"
+                min="0"
+                max="${this.pixelSize > 0 ? (this.pixelSize / 2).toFixed(3) : 0.5}"
+                step="0.001"
+                value="${this.pixelOffset}"
+                @sl-input="${this.handlePixelOffsetChange}"
+              ></sl-range>
+              <span class="value-display">${this.pixelOffset.toFixed(3)} μm</span>
+            </div>
+          ` : ''}
 
-          <div class="control-group">
-            <label for="noiseLevel">Noise Level (RMS):</label>
-            <sl-range
-              id="noiseLevel"
-              min="0"
-              max="0.5"
-              step="0.01"
-              value="${this.noiseLevel}"
-              @sl-input="${this.handleNoiseLevelChange}"
-            ></sl-range>
-            <span class="value-display">${this.noiseLevel.toFixed(2)}</span>
-          </div>
+          ${this.showNoiseLevel ? html`
+            <div class="control-group">
+              <label for="noiseLevel">Noise Level (RMS):</label>
+              <sl-range
+                id="noiseLevel"
+                min="0"
+                max="0.5"
+                step="0.01"
+                value="${this.noiseLevel}"
+                @sl-input="${this.handleNoiseLevelChange}"
+              ></sl-range>
+              <span class="value-display">${this.noiseLevel.toFixed(2)}</span>
+            </div>
+          ` : ''}
 
-          <div class="button-row">
-            <button
-              class="play-button ${this.isPlaying ? 'playing' : ''}"
-              @click="${this.togglePlayback}"
-            >
-              ${this.isPlaying ? '⏸ Stop' : '▶ Play'}
-            </button>
-            <button
-              class="criterion-button ${this.isNearCriterion(this.calculateRayleigh()) ? 'active' : ''}"
-              @click="${this.setRayleighCriterion}"
-            >
-              Rayleigh Criterion
-            </button>
-            <button
-              class="criterion-button ${this.isNearCriterion(this.calculateAbbe()) ? 'active' : ''}"
-              @click="${this.setAbbeCriterion}"
-            >
-              Abbe Limit
-            </button>
-            <button
-              class="criterion-button ${this.isNearCriterion(this.calculateSparrow()) ? 'active' : ''}"
-              @click="${this.setSparrowCriterion}"
-            >
-              Sparrow Criterion
-            </button>
-          </div>
+          ${this.showPlayButton || this.showCriterionButtons ? html`
+            <div class="button-row">
+              ${this.showPlayButton ? html`
+                <button
+                  class="play-button ${this.isPlaying ? 'playing' : ''}"
+                  @click="${this.togglePlayback}"
+                >
+                  ${this.isPlaying ? '⏸ Stop' : '▶ Play'}
+                </button>
+              ` : ''}
+              ${this.showCriterionButtons ? html`
+                <button
+                  class="criterion-button ${this.isNearCriterion(this.calculateRayleigh()) ? 'active' : ''}"
+                  @click="${this.setRayleighCriterion}"
+                >
+                  Rayleigh Criterion
+                </button>
+                <button
+                  class="criterion-button ${this.isNearCriterion(this.calculateAbbe()) ? 'active' : ''}"
+                  @click="${this.setAbbeCriterion}"
+                >
+                  Abbe Limit
+                </button>
+                <button
+                  class="criterion-button ${this.isNearCriterion(this.calculateSparrow()) ? 'active' : ''}"
+                  @click="${this.setSparrowCriterion}"
+                >
+                  Sparrow Criterion
+                </button>
+              ` : ''}
+            </div>
+          ` : ''}
         </div>
 
         <div class="chart-container">
-          <canvas></canvas>
+          <div class="canvas-wrapper">
+            <canvas></canvas>
+          </div>
+          ${this.showGammaSlider ? html`
+            <div class="gamma-slider-container">
+              <div class="vertical-slider-wrapper">
+                <sl-range
+                  id="gamma"
+                  min="0.2"
+                  max="1.0"
+                  step="0.05"
+                  value="${1.2 - this.gammaScale}"
+                  @sl-input="${this.handleGammaChange}"
+                ></sl-range>
+              </div>
+            </div>
+          ` : ''}
         </div>
       </div>
     `;
