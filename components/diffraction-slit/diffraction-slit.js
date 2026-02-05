@@ -2,7 +2,8 @@ import { LitElement, html, css } from 'https://cdn.jsdelivr.net/gh/lit/dist@3/co
 
 /**
  * Interactive diffraction simulation showing plane wave propagation through
- * single or double slits, computed via Huygens-Fresnel wavelet summation.
+ * single or double slits, or focusing through a lens aperture, computed via
+ * Huygens-Fresnel wavelet summation.
  *
  * @element diffraction-slit
  */
@@ -11,6 +12,8 @@ class DiffractionSlit extends LitElement {
     mode: { type: String },
     slitWidth: { type: Number, attribute: 'slit-width' },
     slitSeparation: { type: Number, attribute: 'slit-separation' },
+    aperture: { type: Number },
+    focalLength: { type: Number, attribute: 'focal-length' },
     wavelength: { type: Number },
     renderMode: { type: String, attribute: 'render-mode' },
     numSources: { type: Number, attribute: 'num-sources' },
@@ -24,6 +27,8 @@ class DiffractionSlit extends LitElement {
     showSpeed: { type: Boolean, attribute: 'show-speed' },
     showSlitWidth: { type: Boolean, attribute: 'show-slit-width' },
     showSlitSeparation: { type: Boolean, attribute: 'show-slit-separation' },
+    showAperture: { type: Boolean, attribute: 'show-aperture' },
+    showFocalLength: { type: Boolean, attribute: 'show-focal-length' },
     showRenderMode: { type: Boolean, attribute: 'show-render-mode' },
     showWavelength: { type: Boolean, attribute: 'show-wavelength' },
     showPlayButton: { type: Boolean, attribute: 'show-play-button' },
@@ -142,6 +147,36 @@ class DiffractionSlit extends LitElement {
       transition: transform 0.2s;
     }
     .toggle.on::after { transform: translateX(16px); background: #fff; }
+    .snap-btn {
+      background: none;
+      border: 1px solid #445;
+      color: #8aa;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 4px;
+      margin-left: 4px;
+      line-height: 1.2;
+      vertical-align: middle;
+      transition: all 0.15s;
+    }
+    .snap-btn:hover {
+      background: #4466dd;
+      border-color: #4466dd;
+      color: #fff;
+    }
+    .info-bar {
+      display: flex;
+      gap: 20px;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 6px;
+      margin-top: 10px;
+      color: #8aa;
+      font-size: 12px;
+    }
+    .info-bar span { white-space: nowrap; }
+    .info-bar strong { color: #acc; }
     sl-range {
       --track-color-active: #4466dd;
       --track-color-inactive: #222238;
@@ -158,6 +193,8 @@ class DiffractionSlit extends LitElement {
     this.mode = 'double';
     this.slitWidth = 1;
     this.slitSeparation = 5;
+    this.aperture = 8;
+    this.focalLength = 15;
     this.wavelength = 20;
     this.renderMode = 'intensity';
     this.numSources = 50;
@@ -171,6 +208,8 @@ class DiffractionSlit extends LitElement {
     this.showSpeed = true;
     this.showSlitWidth = true;
     this.showSlitSeparation = true;
+    this.showAperture = true;
+    this.showFocalLength = true;
     this.showRenderMode = true;
     this.showWavelength = true;
     this.showPlayButton = true;
@@ -195,6 +234,21 @@ class DiffractionSlit extends LitElement {
     this._sources = [];
     this._hW = 0;  // reduced-res width
     this._hBY = 0; // half-res barrier height
+  }
+
+  // --- Lens helpers ---
+
+  get _na() {
+    const halfAp = this.aperture / 2;
+    return Math.sin(Math.atan2(halfAp, this.focalLength));
+  }
+
+  get _maxFocalLength() {
+    return this._barrierY / this.wavelength;
+  }
+
+  _snapToScreen() {
+    this.focalLength = this._barrierY / this.wavelength;
   }
 
   async firstUpdated() {
@@ -227,7 +281,16 @@ class DiffractionSlit extends LitElement {
       if (changed.has('slitWidth')) this.slitWidth = this.slitSeparation;
       else this.slitSeparation = this.slitWidth;
     }
-    const needsRecompute = ['slitWidth', 'slitSeparation', 'mode', 'wavelength', 'numSources', 'highQuality'];
+    // Clamp focal length so focal plane stays on-screen
+    if (this.mode === 'lens' && (changed.has('wavelength') || changed.has('focalLength'))) {
+      const max = this._maxFocalLength;
+      if (this.focalLength > max) this.focalLength = max;
+    }
+
+    const needsRecompute = [
+      'slitWidth', 'slitSeparation', 'mode', 'wavelength',
+      'numSources', 'highQuality', 'aperture', 'focalLength',
+    ];
     if (needsRecompute.some(p => changed.has(p)) && this._canvas) {
       this._scheduleRecompute();
     }
@@ -248,11 +311,17 @@ class DiffractionSlit extends LitElement {
     }, 60);
   }
 
-  // --- Slit geometry ---
+  // --- Slit / aperture geometry ---
 
   _getSlitRanges() {
     const lambda = this.wavelength;
     const cx = this._W / 2;
+
+    if (this.mode === 'lens') {
+      const aw = this.aperture * lambda;
+      return [[cx - aw / 2, cx + aw / 2]];
+    }
+
     const sw = this.slitWidth * lambda;
     if (this.mode === 'single') {
       return [[cx - sw / 2, cx + sw / 2]];
@@ -272,11 +341,14 @@ class DiffractionSlit extends LitElement {
     const lambda = this.wavelength;
     const k = (2 * Math.PI) / lambda;
     const res = this.highQuality ? 1 : 2;
+    const center = W / 2;
+    const isLens = this.mode === 'lens';
 
-    // Adaptive source count: ~12 per wavelength of slit width, min 10
-    const N = Math.max(10, Math.round(this.slitWidth * 12));
+    // Adaptive source count: ~12 per wavelength of opening width, min 10
+    const openingWidth = isLens ? this.aperture : this.slitWidth;
+    const N = Math.max(10, Math.round(openingWidth * 12));
 
-    // Build source points (canvas x-coords within slits)
+    // Build source points (canvas x-coords within openings)
     const sources = [];
     const slitRanges = this._getSlitRanges();
     for (const [left, right] of slitRanges) {
@@ -286,7 +358,24 @@ class DiffractionSlit extends LitElement {
       }
     }
 
-    const dxSrc = (this.slitWidth * lambda) / N;
+    // Precompute lens phase if in lens mode
+    let lensPhaseR = null;
+    let lensPhaseI = null;
+    if (isLens) {
+      const fPx = this.focalLength * lambda;
+      lensPhaseR = new Float32Array(sources.length);
+      lensPhaseI = new Float32Array(sources.length);
+      for (let s = 0; s < sources.length; s++) {
+        const xp = sources[s] - center;
+        const phi = -k * xp * xp / (2 * fPx);
+        lensPhaseR[s] = Math.cos(phi);
+        lensPhaseI[s] = Math.sin(phi);
+      }
+    }
+
+    // dxSrc: uniform spacing across each opening
+    const totalWidth = slitRanges.reduce((sum, [l, r]) => sum + (r - l), 0);
+    const dxSrc = totalWidth / sources.length;
 
     // Compute at reduced resolution
     const hW = Math.ceil(W / res);
@@ -310,10 +399,21 @@ class DiffractionSlit extends LitElement {
         for (let s = 0; s < sources.length; s++) {
           const dx = cx - sources[s];
           const r = Math.sqrt(dx * dx + dy2);
-          const amp = dy / (r * Math.sqrt(r));
-          const phase = k * r;
-          uR += amp * Math.cos(phase);
-          uI += amp * Math.sin(phase);
+          const obliq = dy / (r * Math.sqrt(r));
+          const propPhase = k * r;
+          const cosP = Math.cos(propPhase);
+          const sinP = Math.sin(propPhase);
+
+          if (isLens) {
+            // Multiply by lens phase: exp(i*propPhase) * lensPhase
+            const lR = lensPhaseR[s];
+            const lI = lensPhaseI[s];
+            uR += obliq * (cosP * lR - sinP * lI);
+            uI += obliq * (sinP * lR + cosP * lI);
+          } else {
+            uR += obliq * cosP;
+            uI += obliq * sinP;
+          }
         }
         uR *= dxSrc;
         uI *= dxSrc;
@@ -378,7 +478,7 @@ class DiffractionSlit extends LitElement {
     const cosWt = Math.cos(omega * t);
     const sinWt = Math.sin(omega * t);
 
-    // Build slit membership mask
+    // Build slit/aperture membership mask
     const slitRanges = this._getSlitRanges();
     const slitMask = new Uint8Array(W);
     for (const [l, r] of slitRanges) {
@@ -422,7 +522,7 @@ class DiffractionSlit extends LitElement {
         } else if (cy < barrierBot) {
           // Barrier
           if (slitMask[cx]) {
-            // Slit opening
+            // Slit/aperture opening
             const f = Math.cos(k * (barrierBot - cy) + omega * t);
             if (rm === 'intensity') gray = 128 + 127 * clamp(f, -1, 1);
             else if (rm === 'wavefronts') gray = wavefrontGray(f, 1);
@@ -451,6 +551,7 @@ class DiffractionSlit extends LitElement {
     // Overlay layers
     if (rm === 'wavelets') this._drawWavelets(ctx, k, omega, t);
     this._drawBarrierOverlay(ctx, slitRanges);
+    if (this.mode === 'lens') this._drawFocalPlane(ctx);
     this._drawIntensityProfile(ctx);
   }
 
@@ -463,23 +564,33 @@ class DiffractionSlit extends LitElement {
     const sources = this._sources;
     if (!sources.length) return;
 
-    // Select evenly-spaced subset
+    const isLens = this.mode === 'lens';
     const perSlit = this.waveletCount;
     const slitRanges = this._getSlitRanges();
     const displaySources = [];
-    for (const [left, right] of slitRanges) {
-      // find sources within this slit
-      const inSlit = sources.filter(sx => sx >= left && sx <= right);
-      const n = Math.min(perSlit, inSlit.length);
-      if (n <= 0) continue;
-      const step = inSlit.length / n;
+
+    if (isLens) {
+      // Single group across all sources
+      const n = Math.min(perSlit, sources.length);
+      const step = sources.length / n;
       for (let i = 0; i < n; i++) {
-        displaySources.push(inSlit[Math.floor(i * step + step / 2)]);
+        displaySources.push(sources[Math.floor(i * step + step / 2)]);
+      }
+    } else {
+      // Per-slit grouping
+      for (const [left, right] of slitRanges) {
+        const inSlit = sources.filter(sx => sx >= left && sx <= right);
+        const n = Math.min(perSlit, inSlit.length);
+        if (n <= 0) continue;
+        const step = inSlit.length / n;
+        for (let i = 0; i < n; i++) {
+          displaySources.push(inSlit[Math.floor(i * step + step / 2)]);
+        }
       }
     }
 
-    // Phase offset (fractional wavelength)
-    const phaseOff = (((omega * t) / (2 * Math.PI)) % 1 + 1) % 1;
+    const center = W / 2;
+    const fPx = this.focalLength * lambda;
 
     ctx.save();
     // Clip to diffracted region
@@ -492,6 +603,17 @@ class DiffractionSlit extends LitElement {
 
     const maxR = Math.sqrt(W * W + barrierY * barrierY);
     for (const sx of displaySources) {
+      let phaseOff;
+      if (isLens) {
+        // Per-source lens phase offset
+        const xp = sx - center;
+        const lensPhi = -k * xp * xp / (2 * fPx);
+        phaseOff = ((((omega * t - lensPhi) / (2 * Math.PI)) % 1) + 1) % 1;
+      } else {
+        // Uniform phase offset for slit modes
+        phaseOff = (((omega * t) / (2 * Math.PI)) % 1 + 1) % 1;
+      }
+
       for (let n = 0; n < maxR / lambda; n++) {
         const r = (n + phaseOff) * lambda;
         if (r < 2) continue;
@@ -511,7 +633,7 @@ class DiffractionSlit extends LitElement {
     const bh = this._barrierH;
 
     ctx.fillStyle = '#383848';
-    // Left of first slit
+    // Fill barrier segments between openings
     let prev = 0;
     for (const [l, r] of slitRanges) {
       if (l > prev) ctx.fillRect(prev, by, l - prev, bh);
@@ -519,12 +641,46 @@ class DiffractionSlit extends LitElement {
     }
     if (prev < W) ctx.fillRect(prev, by, W - prev, bh);
 
-    // Slit edge markers
-    ctx.strokeStyle = '#667';
-    ctx.lineWidth = 1;
-    for (const [l, r] of slitRanges) {
-      ctx.strokeRect(l, by, r - l, bh);
+    if (this.mode === 'lens') {
+      // Lens element visualization: curved lens shape
+      const [apLeft, apRight] = slitRanges[0];
+      ctx.strokeStyle = '#6688cc';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const midY = by + bh / 2;
+      const bulge = 6;
+      ctx.moveTo(apLeft, midY);
+      ctx.quadraticCurveTo((apLeft + apRight) / 2, midY - bulge, apRight, midY);
+      ctx.moveTo(apLeft, midY);
+      ctx.quadraticCurveTo((apLeft + apRight) / 2, midY + bulge, apRight, midY);
+      ctx.stroke();
+    } else {
+      // Slit edge markers
+      ctx.strokeStyle = '#667';
+      ctx.lineWidth = 1;
+      for (const [l, r] of slitRanges) {
+        ctx.strokeRect(l, by, r - l, bh);
+      }
     }
+  }
+
+  // --- Focal plane indicator ---
+
+  _drawFocalPlane(ctx) {
+    const focalPlaneCy = this._barrierY - this.focalLength * this.wavelength;
+    if (focalPlaneCy < 0 || focalPlaneCy >= this._barrierY) return;
+    ctx.strokeStyle = 'rgba(255, 200, 80, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, focalPlaneCy);
+    ctx.lineTo(this._W, focalPlaneCy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(255, 200, 80, 0.5)';
+    ctx.font = '10px system-ui';
+    ctx.fillText('focal plane', 6, focalPlaneCy - 4);
   }
 
   // --- Intensity profile at screen ---
@@ -575,24 +731,28 @@ class DiffractionSlit extends LitElement {
   // --- Template ---
 
   render() {
+    const isLens = this.mode === 'lens';
+    const na = this._na;
     return html`
       <div class="container">
         <canvas id="wave-canvas" width="${this._W}" height="${this._H}"></canvas>
         <div class="controls">
           <div class="control-row">
             ${this.showModeSelector ? html`
-              <div class="control-group" style="flex: 0 0 25%">
-                <label>Slit Configuration</label>
+              <div class="control-group" style="flex: 0 0 33%">
+                <label>Configuration</label>
                 <div class="button-group">
-                  <button class="${this.mode === 'single' ? 'active' : ''}"
-                          @click=${() => { this.mode = 'single'; }}>Single</button>
                   <button class="${this.mode === 'double' ? 'active' : ''}"
                           @click=${() => { this.mode = 'double'; }}>Double</button>
+                  <button class="${this.mode === 'single' ? 'active' : ''}"
+                          @click=${() => { this.mode = 'single'; }}>Single</button>
+                  <button class="${this.mode === 'lens' ? 'active' : ''}"
+                          @click=${() => { this.mode = 'lens'; }}>Lens</button>
                 </div>
               </div>
             ` : ''}
 
-            ${this.showSlitWidth ? html`
+            ${!isLens && this.showSlitWidth ? html`
               <div class="control-group">
                 <label>Slit Width: ${this.slitWidth.toFixed(1)}\u03BB</label>
                 <sl-range min="0.5" max="10" step="0.1"
@@ -602,12 +762,36 @@ class DiffractionSlit extends LitElement {
               </div>
             ` : ''}
 
-            ${this.showSlitSeparation && this.mode === 'double' ? html`
+            ${!isLens && this.showSlitSeparation && this.mode === 'double' ? html`
               <div class="control-group">
                 <label>Separation: ${this.slitSeparation.toFixed(1)}\u03BB</label>
                 <sl-range min="0.5" max="25" step="0.1"
                           .value=${this.slitSeparation}
                           @sl-input=${(e) => { this.slitSeparation = parseFloat(e.target.value); }}>
+                </sl-range>
+              </div>
+            ` : ''}
+
+            ${isLens && this.showAperture ? html`
+              <div class="control-group">
+                <label>Aperture: ${this.aperture.toFixed(1)}\u03BB</label>
+                <sl-range min="1" max="20" step="0.5"
+                          .value=${this.aperture}
+                          @sl-input=${(e) => { this.aperture = parseFloat(e.target.value); }}>
+                </sl-range>
+              </div>
+            ` : ''}
+
+            ${isLens && this.showFocalLength ? html`
+              <div class="control-group">
+                <label>Focal Length: ${this.focalLength.toFixed(0)}\u03BB
+                  <button class="snap-btn"
+                          title="Snap focal plane to screen"
+                          @click=${this._snapToScreen}>\u2316</button>
+                </label>
+                <sl-range min="5" max="${this._maxFocalLength}" step="0.5"
+                          .value=${this.focalLength}
+                          @sl-input=${(e) => { this.focalLength = parseFloat(e.target.value); }}>
                 </sl-range>
               </div>
             ` : ''}
@@ -678,6 +862,14 @@ class DiffractionSlit extends LitElement {
           </div>
 
         </div>
+
+        ${isLens ? html`
+          <div class="info-bar">
+            <span><strong>NA</strong> = ${na.toFixed(3)}</span>
+            <span><strong>Airy radius</strong> \u2248 ${(0.61 / na).toFixed(1)}\u03BB</span>
+            <span><strong>f/# </strong> = ${(this.focalLength / this.aperture).toFixed(1)}</span>
+          </div>
+        ` : ''}
       </div>
     `;
   }
