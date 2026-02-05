@@ -106,6 +106,7 @@ class DiffractionSlit extends LitElement {
       color: #fff;
     }
     .play-btn {
+      width: 80px;
       padding: 7px 18px;
       border: 1px solid #334;
       background: #1e1e30;
@@ -114,7 +115,6 @@ class DiffractionSlit extends LitElement {
       cursor: pointer;
       font-size: 13px;
       transition: all 0.15s;
-      width: 100%;
     }
     .play-btn:hover { background: #2a2a44; }
     .play-btn.playing { background: #c44; border-color: #c44; color: #fff; }
@@ -581,7 +581,7 @@ class DiffractionSlit extends LitElement {
         <div class="controls">
           <div class="control-row">
             ${this.showModeSelector ? html`
-              <div class="control-group">
+              <div class="control-group" style="flex: 0 0 25%">
                 <label>Slit Configuration</label>
                 <div class="button-group">
                   <button class="${this.mode === 'single' ? 'active' : ''}"
