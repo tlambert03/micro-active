@@ -13,8 +13,9 @@ class GaussianProfile extends LitElement {
     wavelength: { type: Number },
     distance: { type: Number },
     pixelSize: { type: Number },
-    pixelOffset: { type: Number },
+    pixelShift: { type: Number, attribute: 'pixel-shift' },
     noiseLevel: { type: Number },
+    photonCount: { type: Number, attribute: 'photon-count' },
     gammaScale: { type: Number },
     isPlaying: { type: Boolean },
 
@@ -23,8 +24,9 @@ class GaussianProfile extends LitElement {
     showWavelength: { type: Boolean, attribute: 'show-wavelength' },
     showDistance: { type: Boolean, attribute: 'show-distance' },
     showPixelSize: { type: Boolean, attribute: 'show-pixel-size' },
-    showPixelOffset: { type: Boolean, attribute: 'show-pixel-offset' },
+    showPixelShift: { type: Boolean, attribute: 'show-pixel-shift' },
     showNoiseLevel: { type: Boolean, attribute: 'show-noise-level' },
+    showPhotonCount: { type: Boolean, attribute: 'show-photon-count' },
     showGammaSlider: { type: Boolean, attribute: 'show-gamma-slider' },
     showPlayButton: { type: Boolean, attribute: 'show-play-button' },
     showCriterionButtons: { type: Boolean, attribute: 'show-criterion-buttons' },
@@ -236,8 +238,9 @@ class GaussianProfile extends LitElement {
     this.wavelength = 550;
     this.distance = 0.5;
     this.pixelSize = 0;
-    this.pixelOffset = 0;
+    this.pixelShift = 0;
     this.noiseLevel = 0;
+    this.photonCount = 10000; // Peak intensity corresponds to 10k photons
     this.isPlaying = false;
     this.gammaScale = 1.0;
 
@@ -246,8 +249,9 @@ class GaussianProfile extends LitElement {
     this.showWavelength = true;
     this.showDistance = true;
     this.showPixelSize = true;
-    this.showPixelOffset = true;
+    this.showPixelShift = false;
     this.showNoiseLevel = true;
+    this.showPhotonCount = false;
     this.showGammaSlider = true;
     this.showPlayButton = true;
     this.showCriterionButtons = true;
@@ -383,7 +387,7 @@ class GaussianProfile extends LitElement {
   /**
    * Discretize continuous data into pixels
    */
-  discretizeData(continuousData, pixelSize, pixelOffset, noiseLevel = 0) {
+  discretizeData(continuousData, pixelSize, pixelShift, noiseLevel = 0) {
     if (pixelSize <= 0) return [];
 
     const discretized = [];
@@ -391,8 +395,8 @@ class GaussianProfile extends LitElement {
     const rMax = 2.0;
 
     // Calculate pixel boundaries
-    // Start from offset and create pixels of size pixelSize
-    let pixelStart = -pixelOffset;
+    // Start from shift and create pixels of size pixelSize
+    let pixelStart = -pixelShift;
 
     // Adjust to cover the full range
     while (pixelStart > rMin) {
@@ -411,16 +415,28 @@ class GaussianProfile extends LitElement {
 
       if (pointsInPixel.length > 0) {
         // Calculate average intensity for this pixel
-        let avgIntensity = pointsInPixel.reduce((sum, p) => sum + p.y, 0) / pointsInPixel.length;
+        let signal = pointsInPixel.reduce((sum, p) => sum + p.y, 0) / pointsInPixel.length;
 
-        // Add Gaussian noise
+        // Add combined noise: shot noise + read noise
+        let noisySignal = signal;
+
+        // Shot noise (Poisson): only for positive signals
+        if (signal > 0 && this.photonCount > 0) {
+          // Convert to photon count, add Poisson noise (approximated as Gaussian)
+          const gain = this.photonCount / 2.0; // photons per unit intensity (peak=2.0)
+          const photons = signal * gain;
+          const shotNoiseStd = Math.sqrt(photons) / gain;
+          noisySignal += this.gaussianRandom(0, shotNoiseStd);
+        }
+
+        // Read noise (Gaussian): signal-independent
         if (noiseLevel > 0) {
-          avgIntensity += this.gaussianRandom(0, noiseLevel);
+          noisySignal += this.gaussianRandom(0, noiseLevel);
         }
 
         // Create step: add points at both edges with same y value
-        discretized.push({ x: pixelStart, y: avgIntensity });
-        discretized.push({ x: pixelEnd, y: avgIntensity });
+        discretized.push({ x: pixelStart, y: noisySignal });
+        discretized.push({ x: pixelEnd, y: noisySignal });
       }
 
       pixelStart = pixelEnd;
@@ -445,7 +461,7 @@ class GaussianProfile extends LitElement {
     const discretizedData = this.discretizeData(
       dataSum,
       this.pixelSize,
-      this.pixelOffset,
+      this.pixelShift,
       this.noiseLevel
     );
 
@@ -592,13 +608,18 @@ class GaussianProfile extends LitElement {
     this.updateChart();
   }
 
-  handlePixelOffsetChange(e) {
-    this.pixelOffset = parseFloat(e.target.value);
+  handlePixelShiftChange(e) {
+    this.pixelShift = parseFloat(e.target.value);
     this.updateChart();
   }
 
   handleNoiseLevelChange(e) {
     this.noiseLevel = parseFloat(e.target.value);
+    this.updateChart();
+  }
+
+  handlePhotonCountChange(e) {
+    this.photonCount = parseFloat(e.target.value);
     this.updateChart();
   }
 
@@ -735,7 +756,7 @@ class GaussianProfile extends LitElement {
     const discretizedData = this.discretizeData(
       dataSum,
       this.pixelSize,
-      this.pixelOffset,
+      this.pixelShift,
       this.noiseLevel
     );
 
@@ -852,24 +873,24 @@ class GaussianProfile extends LitElement {
             </div>
           ` : ''}
 
-          ${this.showPixelOffset ? html`
+          ${this.showPixelShift ? html`
             <div class="control-group">
-              <label for="pixelOffset">Pixel Offset (μm):</label>
+              <label for="pixelShift">Pixel Shift (μm):</label>
               <sl-range
-                id="pixelOffset"
+                id="pixelShift"
                 min="0"
                 max="${this.pixelSize > 0 ? (this.pixelSize / 2).toFixed(3) : 0.5}"
                 step="0.001"
-                value="${this.pixelOffset}"
-                @sl-input="${this.handlePixelOffsetChange}"
+                value="${this.pixelShift}"
+                @sl-input="${this.handlePixelShiftChange}"
               ></sl-range>
-              <span class="value-display">${this.pixelOffset.toFixed(3)} μm</span>
+              <span class="value-display">${this.pixelShift.toFixed(3)} μm</span>
             </div>
           ` : ''}
 
           ${this.showNoiseLevel ? html`
             <div class="control-group">
-              <label for="noiseLevel">Noise Level (RMS):</label>
+              <label for="noiseLevel">Read Noise (RMS):</label>
               <sl-range
                 id="noiseLevel"
                 min="0"
@@ -879,6 +900,21 @@ class GaussianProfile extends LitElement {
                 @sl-input="${this.handleNoiseLevelChange}"
               ></sl-range>
               <span class="value-display">${this.noiseLevel.toFixed(2)}</span>
+            </div>
+          ` : ''}
+
+          ${this.showPhotonCount ? html`
+            <div class="control-group">
+              <label for="photonCount">Photon Count (peak):</label>
+              <sl-range
+                id="photonCount"
+                min="100"
+                max="20000"
+                step="10"
+                value="${this.photonCount}"
+                @sl-input="${this.handlePhotonCountChange}"
+              ></sl-range>
+              <span class="value-display">${this.photonCount.toLocaleString()}</span>
             </div>
           ` : ''}
 
