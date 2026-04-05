@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ISM / Airyscan Tutorial - Demo</title>
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$']] },
+      svg: { fontCache: 'global' },
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: linear-gradient(135deg, #1a1a3e 0%, #0d0d2b 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    .header {
+      color: white;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      margin: 0 0 10px 0;
+      font-size: 2.5em;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .header p {
+      margin: 0;
+      font-size: 1.1em;
+      opacity: 0.8;
+    }
+
+    .demo-container {
+      width: 100%;
+      max-width: 900px;
+    }
+
+    .info-box {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .info-box h3 {
+      margin: 20px 0 8px 0;
+      color: #333;
+      font-size: 1.1em;
+    }
+
+    .info-box h3:first-child {
+      margin-top: 0;
+    }
+
+    .info-box p {
+      color: #555;
+      line-height: 1.7;
+      font-size: 0.95em;
+      margin-bottom: 8px;
+    }
+
+    .info-box .math-block {
+      background: #f8f8fc;
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin: 10px 0;
+      border-left: 3px solid #667eea;
+      overflow-x: auto;
+    }
+
+    .info-box dt {
+      font-weight: 600;
+      color: #333;
+      margin-top: 8px;
+    }
+
+    .info-box dd {
+      color: #555;
+      margin-left: 16px;
+      margin-bottom: 4px;
+      line-height: 1.6;
+      font-size: 0.93em;
+    }
+
+    .info-box .references {
+      font-size: 0.88em;
+      color: #666;
+      line-height: 1.7;
+    }
+  </style>
+  <script type="module" src="./ism-tutorial.js"></script>
+</head>
+<body>
+  <div class="header">
+    <h1>Image Scanning Microscopy</h1>
+    <p>How ISM, Airyscan, and Re-scan microscopy achieve super-resolution</p>
+  </div>
+
+  <div class="demo-container">
+    <ism-tutorial></ism-tutorial>
+
+    <div class="info-box">
+      <h3>About This Tutorial</h3>
+      <p>
+        Image Scanning Microscopy (ISM) is a family of techniques — including Zeiss Airyscan,
+        Re-scan confocal microscopy, and Instant SIM — that achieve up to √2× better resolution
+        than conventional widefield microscopy <em>without sacrificing signal</em>. This tutorial
+        walks through the three key insights that make ISM work.
+      </p>
+
+      <h3>Key Equations</h3>
+
+      <div class="math-block">
+        <p><strong>Airy disk</strong> (point spread function):</p>
+        $$ I(r) = \left[ \frac{2 J_1(\pi r)}{\pi r} \right]^2 $$
+        <p>where $r$ is in Airy Units (AU), with first zero at $r = 1$ AU
+        ($= 0.61\lambda / \text{NA}$).</p>
+      </div>
+
+      <div class="math-block">
+        <p><strong>Confocal PSF</strong>:</p>
+        $$ h_{\text{conf}}(r) = h_{\text{exc}}(r) \cdot \left[ h_{\text{det}}(r) \otimes P(r) \right] $$
+        <p>where $P(r)$ is the pinhole function. As $P \to \delta$, the PSF narrows to
+        $h_{\text{exc}} \cdot h_{\text{det}} \approx h^2$, giving √2 improvement.</p>
+      </div>
+
+      <div class="math-block">
+        <p><strong>Off-axis effective PSF</strong>:</p>
+        $$ h_{\text{eff}}(r; d) = h_{\text{exc}}(r) \cdot h_{\text{det}}(r - d) $$
+        <p>Peak is at $\approx d/2$ — the image shifts by half the pinhole displacement.</p>
+      </div>
+
+      <div class="math-block">
+        <p><strong>ISM reconstruction</strong> (pixel reassignment):</p>
+        $$ h_{\text{ISM}}(r) = \sum_{k} h_{\text{eff}}(r + d_k/2;\, d_k) $$
+        <p>Shift each detector element's image back by $d_k/2$ before summing.
+        Result: narrow PSF (like closed pinhole) with high signal (like open pinhole).</p>
+      </div>
+
+      <h3>Terminology</h3>
+      <dl>
+        <dt>AU (Airy Unit)</dt>
+        <dd>Distance from the center to the first zero of the Airy pattern:
+          $0.61\lambda / \text{NA}$. A standard confocal pinhole of "1 AU" diameter
+          passes most of the central Airy disk.</dd>
+        <dt>Pixel Reassignment</dt>
+        <dd>The process of shifting each detector element's image by half its offset
+          before summing, to produce a sharp combined image.</dd>
+        <dt>Airyscan</dt>
+        <dd>Zeiss's implementation using a 32-element hexagonal GaAsP detector array
+          in a point-scanning confocal, with computational pixel reassignment.</dd>
+        <dt>Instant SIM</dt>
+        <dd>An optical (analog) implementation of pixel reassignment using microlens
+          arrays to optically shrink the emission pattern by 2×.</dd>
+      </dl>
+
+      <h3>References</h3>
+      <div class="references">
+        <p>1. Sheppard, C.J.R. (1988). Super-resolution in confocal imaging.
+          <em>Optik</em>, 80(2), 53–54.</p>
+        <p>2. Müller, C.B. & Enderlein, J. (2010). Image scanning microscopy.
+          <em>Phys. Rev. Lett.</em>, 104, 198101.</p>
+        <p>3. York, A.G. et al. (2012). Resolution doubling in live, multicellular
+          organisms via multifocal structured illumination microscopy.
+          <em>Nature Methods</em>, 9, 749–754.</p>
+        <p>4. York, A.G. et al. (2013). Instant super-resolution imaging in live cells
+          and embryos via analog image processing. <em>Nature Methods</em>, 10, 1122–1126.</p>
+        <p>5. Weisshart, K. (2014). The basic principle of Airyscanning.
+          ZEISS Technology Note.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
