@@ -330,6 +330,7 @@ function drawPlot(ctx, rect, curves, options) {
     ctx.beginPath();
     let started = false;
     for (let i = 0; i < grid.length; i++) {
+      if (curve.xEnd !== undefined && grid[i] > curve.xEnd) break;
       const px = toX(grid[i]);
       const py = toY(curve.data[i]);
       if (px >= x && px <= x + w) {
@@ -423,6 +424,9 @@ class IsmTutorial extends LitElement {
     normalized: { type: Boolean },
     pinholeOffset: { type: Number, attribute: 'pinhole-offset' },
     pinholeSize2: { type: Number, attribute: 'pinhole-size-2' },
+    beamPos: { type: Number, attribute: 'beam-pos' },
+    pinholeSize4: { type: Number, attribute: 'pinhole-size-4' },
+    pinholeOffset4: { type: Number, attribute: 'pinhole-offset-4' },
     selectedElement: { type: Number, attribute: 'selected-element' },
     showReassignment: { type: Boolean, attribute: 'show-reassignment' },
     _reassignProgress: { state: true },
@@ -606,6 +610,9 @@ class IsmTutorial extends LitElement {
     this.normalized = true;
     this.pinholeOffset = 0.8;
     this.pinholeSize2 = 0;
+    this.beamPos = -0.4;
+    this.pinholeSize4 = 0.5;
+    this.pinholeOffset4 = 0;
     this.selectedElement = -1; // -1 = all
     this._lastSingleElement = 0;
     this.showReassignment = false;
@@ -704,6 +711,7 @@ class IsmTutorial extends LitElement {
     if (this.step === 1) this._renderStep1(ctx, cssW, cssH);
     else if (this.step === 2) this._renderStep2(ctx, cssW, cssH);
     else if (this.step === 3) this._renderStep3(ctx, cssW, cssH);
+    else if (this.step === 4) this._renderStep4(ctx, cssW, cssH);
   }
 
   // ── Step 1: Confocal pinhole ───────────────────────────────────
@@ -1375,6 +1383,172 @@ class IsmTutorial extends LitElement {
     }
   }
 
+  // ── Step 4: Scanning beam build-up ─────────────────────────────
+
+  _renderStep4(ctx, W, H) {
+    const grid = this._grid;
+    const n = grid.length;
+    const dx = grid[1] - grid[0];
+    const beamPos = this.beamPos;
+    const phSize = this.pinholeSize4;
+    const phOffset = this.pinholeOffset4;
+    const pinCenter = beamPos + phOffset;
+    const norm = this.normalized;
+
+    // Excitation beam: Airy disc centered at scan position
+    const excBeam = new Float64Array(n);
+    for (let i = 0; i < n; i++) excBeam[i] = airyDisk(grid[i] - beamPos);
+
+    // Excitation intensity at the point emitter (x = 0)
+    const excAtEmitter = airyDisk(beamPos);
+
+    // Emission PSF: centered at the emitter, scaled by excitation there
+    const emissionPSF = new Float64Array(n);
+    for (let i = 0; i < n; i++) emissionPSF[i] = airyDisk(grid[i]) * excAtEmitter;
+
+    // Static effective PSF with optional pinhole offset D:
+    //   I_eff(x_s) = h_exc(x_s) · (h_det ⊛ P)(x_s + D)
+    // Derivation: pinhole is centered at x_s + D, so collected signal is
+    //   ∫ h_det(x) · tophat(x − (x_s + D), ρ) dx.
+    // Since tophat is symmetric this equals (h_det ∗ P)(x_s + D) with P the
+    // centered top-hat; we reuse the on-axis convDet and sample it at x_s + D.
+    //
+    // We compute the *shape* (unscaled by 2·phSize for sub-grid pinholes) so
+    // that the normalized-mode display stays meaningful at phSize → 0, where
+    // the shape limits to h_exc(x_s) · h_det(x_s + D). The sub-grid scale
+    // factor is re-applied below only for unnormalized display, so that the
+    // absolute effective PSF still vanishes as phSize → 0.
+    const excStatic = airyDiskArray(grid);
+    const detStatic = airyDiskArray(grid);
+    // Total emission integral over the simulation grid. We divide the
+    // effective PSF by this so the y-axis has a consistent "intensity"
+    // interpretation across all curves: effPSF represents excitation ×
+    // fraction-of-emission-captured, matching the peak=1 convention used
+    // for h_exc and h_det. As phSize → grid extent, effPSF → h_exc.
+    const totalDetInt = integrate(detStatic, grid);
+    const subGrid = phSize < 2 * dx;
+    let convDetShape;
+    if (subGrid) {
+      convDetShape = detStatic; // limit shape: h_det
+    } else {
+      const pin = new Float64Array(n);
+      for (let i = 0; i < n; i++) pin[i] = tophat(grid[i], phSize);
+      convDetShape = convolve1D(detStatic, pin, dx);
+    }
+    const effPSF = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const srcIdx = (grid[i] + phOffset - grid[0]) / dx;
+      const lo = Math.floor(srcIdx);
+      const frac = srcIdx - lo;
+      let convVal = 0;
+      if (lo >= 0 && lo + 1 < n) {
+        convVal = convDetShape[lo] * (1 - frac) + convDetShape[lo + 1] * frac;
+      } else if (lo === n - 1) {
+        convVal = convDetShape[n - 1];
+      }
+      effPSF[i] = excStatic[i] * convVal / totalDetInt;
+    }
+
+    let plotEff = effPSF;
+    const yMax = 1.1;
+    if (norm) {
+      let m = 0;
+      for (const v of effPSF) if (v > m) m = v;
+      if (m > 0) {
+        plotEff = new Float64Array(n);
+        for (let i = 0; i < n; i++) plotEff[i] = effPSF[i] / m;
+      }
+    } else if (subGrid) {
+      // Re-apply the 2·phSize factor so unnormalized amplitude collapses to 0
+      plotEff = new Float64Array(n);
+      for (let i = 0; i < n; i++) plotEff[i] = effPSF[i] * 2 * phSize;
+    }
+
+    const rect = { x: 50, y: 30, w: W - 100, h: H - 80 };
+    const xMin = -3, xMax = 3;
+    const toX = (v) => rect.x + (v - xMin) / (xMax - xMin) * rect.w;
+    const toY = (v) => rect.y + rect.h - v / yMax * rect.h;
+
+    // ── Filled region: emission PSF clipped by pinhole window ──
+    const pinLeft = Math.max(pinCenter - phSize, xMin);
+    const pinRight = Math.min(pinCenter + phSize, xMax);
+    if (pinRight > pinLeft && phSize > 0) {
+      const interp = (x) => {
+        const idx = (x - grid[0]) / dx;
+        const lo = Math.floor(idx);
+        const frac = idx - lo;
+        if (lo < 0) return emissionPSF[0];
+        if (lo + 1 >= n) return emissionPSF[n - 1];
+        return emissionPSF[lo] * (1 - frac) + emissionPSF[lo + 1] * frac;
+      };
+
+      ctx.fillStyle = 'rgba(255,119,102,0.28)';
+      ctx.beginPath();
+      ctx.moveTo(toX(pinLeft), toY(0));
+      ctx.lineTo(toX(pinLeft), toY(interp(pinLeft)));
+      for (let i = 0; i < n; i++) {
+        if (grid[i] > pinLeft && grid[i] < pinRight) {
+          ctx.lineTo(toX(grid[i]), toY(emissionPSF[i]));
+        }
+      }
+      ctx.lineTo(toX(pinRight), toY(interp(pinRight)));
+      ctx.lineTo(toX(pinRight), toY(0));
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ── Pinhole boundary verticals (faint dashed) ──
+    if (phSize > 0) {
+      ctx.strokeStyle = 'rgba(255,200,150,0.55)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      if (pinLeft > xMin) {
+        ctx.moveTo(toX(pinLeft), rect.y);
+        ctx.lineTo(toX(pinLeft), rect.y + rect.h);
+      }
+      if (pinRight < xMax) {
+        ctx.moveTo(toX(pinRight), rect.y);
+        ctx.lineTo(toX(pinRight), rect.y + rect.h);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    const curves = [
+      { data: excBeam, color: '#5599ff', lineWidth: 1.5, label: 'Excitation beam' },
+      { data: emissionPSF, color: '#ff7766', lineWidth: 2, label: 'Emission PSF' },
+      { data: plotEff, color: '#66ff99', lineWidth: 2.5, dash: [6, 4], label: 'Effective PSF' },
+    ];
+
+    drawPlot(ctx, rect, curves, {
+      grid, xRange: [xMin, xMax], yRange: [0, yMax],
+      xLabel: 'Position (AU)', yLabel: norm ? 'Intensity (norm.)' : 'Intensity',
+      title: 'Scanning Confocal: Building the Effective PSF',
+    });
+
+    // ── Point emitter marker at x = 0 ──
+    ctx.fillStyle = '#ff7766';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(toX(0), toY(0), 5, 0, 2 * PI);
+    ctx.fill();
+    ctx.stroke();
+
+    // ── Beam-position marker on effective PSF curve ──
+    const beamIdx = Math.round((beamPos - grid[0]) / dx);
+    if (beamIdx >= 0 && beamIdx < n) {
+      ctx.fillStyle = '#66ff99';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(toX(beamPos), toY(plotEff[beamIdx]), 5, 0, 2 * PI);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
   // ── Reassignment animation ─────────────────────────────────────
 
   _startReassignmentAnimation() {
@@ -1427,7 +1601,7 @@ class IsmTutorial extends LitElement {
 
   _setStep(step) {
     this.step = step;
-    if (step === 2 || step === 3) this.normalized = false;
+    if (step === 2 || step === 3 || step === 4) this.normalized = false;
   }
 
   _onPinholeSize(e) {
@@ -1459,6 +1633,12 @@ class IsmTutorial extends LitElement {
         Since each element's image is shifted by a known amount (d/2), we can shift
         them all back and sum — recovering <strong>√2× resolution with full signal</strong>.
         Click detector elements to explore.`,
+      4: html`<strong>How the PSF emerges:</strong> A single emitter sits at x=0.
+        As the scanning beam moves, it excites the emitter proportionally to its
+        intensity there, and the pinhole (moving with the beam) collects only the
+        emission that falls inside its window. The <strong>effective PSF</strong>
+        is the product of excitation × (emission ∩ pinhole) — try scanning the beam
+        and shrinking the pinhole.`,
     };
 
     return html`
@@ -1470,6 +1650,8 @@ class IsmTutorial extends LitElement {
             @click=${() => this._setStep(2)}>2. Off-Axis Effect</button>
           <button class="step-btn ${this.step === 3 ? 'active' : ''}"
             @click=${() => this._setStep(3)}>3. ISM Reconstruction</button>
+          <button class="step-btn ${this.step === 4 ? 'active' : ''}"
+            @click=${() => this._setStep(4)}>4. PSF Formation</button>
         </div>
 
         <div class="step-description">${stepDescriptions[this.step]}</div>
@@ -1480,6 +1662,7 @@ class IsmTutorial extends LitElement {
         ${this.step === 1 ? this._renderStep1Controls() : ''}
         ${this.step === 2 ? this._renderStep2Controls() : ''}
         ${this.step === 3 ? this._renderStep3Controls() : ''}
+        ${this.step === 4 ? this._renderStep4Controls() : ''}
       </div>
     `;
   }
@@ -1578,6 +1761,48 @@ class IsmTutorial extends LitElement {
               | Offset r: <span class="highlight">${elR.toFixed(2)} AU</span>
               | Shift: <span class="highlight">${(-elR / 2).toFixed(2)} AU</span></span>`
         }
+      </div>
+    `;
+  }
+
+  _renderStep4Controls() {
+    return html`
+      <div class="controls" style="flex-direction: column;">
+        <div class="control-group" style="width: 100%;">
+          <label>Beam position</label>
+          <sl-range min="-2" max="2" step="0.02"
+            value=${this.beamPos}
+            @sl-input=${(e) => { this.beamPos = parseFloat(e.target.value); }}></sl-range>
+          <span class="value">${this.beamPos.toFixed(2)} AU</span>
+        </div>
+        <div style="display: flex; gap: 20px; align-items: center; width: 100%;">
+          <div class="control-group" style="flex: 1;">
+            <label>Pinhole size</label>
+            <sl-range min="0" max="3" step="0.02"
+              value=${this.pinholeSize4}
+              @sl-input=${(e) => { this.pinholeSize4 = parseFloat(e.target.value); }}></sl-range>
+            <span class="value">${this.pinholeSize4 === 0 ? 'point' : this.pinholeSize4.toFixed(2) + ' AU'}</span>
+          </div>
+          <div class="btn-group">
+            <button class="${this.normalized ? 'active' : ''}"
+              @click=${() => { this.normalized = true; }}>Normalized</button>
+            <button class="${!this.normalized ? 'active' : ''}"
+              @click=${() => { this.normalized = false; }}>Unnormalized</button>
+          </div>
+        </div>
+        <div class="control-group" style="width: 100%;">
+          <label>Pinhole offset</label>
+          <sl-range min="-1" max="1" step="0.02"
+            value=${this.pinholeOffset4}
+            @sl-input=${(e) => { this.pinholeOffset4 = parseFloat(e.target.value); }}></sl-range>
+          <span class="value">${this.pinholeOffset4.toFixed(2)} AU</span>
+        </div>
+      </div>
+      <div class="info-bar">
+        <span>Beam: <span class="highlight">${this.beamPos.toFixed(2)} AU</span></span>
+        <span>Pinhole offset: <span class="highlight">${this.pinholeOffset4.toFixed(2)} AU</span></span>
+        <span>Pinhole size: <span class="highlight">${this.pinholeSize4 === 0 ? 'point' : this.pinholeSize4.toFixed(2) + ' AU'}</span></span>
+        <span>Excitation at emitter: <span class="highlight">${airyDisk(this.beamPos).toFixed(3)}</span></span>
       </div>
     `;
   }
