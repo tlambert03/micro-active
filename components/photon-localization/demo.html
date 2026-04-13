@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photon Localization Precision Demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0f0f23;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  h1 {
+    font-size: 1.6rem;
+    color: #fff;
+    margin-bottom: 4px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .subtitle {
+    font-size: 0.95rem;
+    color: #0db5e0;
+    margin-bottom: 18px;
+    font-style: italic;
+  }
+  .main-container {
+    display: flex;
+    gap: 28px;
+    align-items: flex-start;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+  }
+  .plot-column {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  .plot-area {
+    position: relative;
+    background: #1a1a2e;
+    border: 2px solid #2a2a4a;
+    border-radius: 8px;
+    overflow: hidden;
+    flex: 1;
+    min-height: 300px;
+  }
+  .plot-area canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  canvas { display: block; }
+  .side-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 280px;
+    max-width: 320px;
+  }
+  .stat-card {
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .stat-card h3 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #888;
+    margin-bottom: 10px;
+  }
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+  .stat-label { font-size: 0.85rem; color: #aaa; }
+  .stat-value { font-size: 1.1rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat-value.photons { color: #ffd60a; }
+  .stat-value.mean { color: #0db5e0; }
+  .stat-value.ci { color: #e94560; }
+  .stat-value.precision { color: #55a380; }
+
+  .convergence-canvas-wrapper {
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .convergence-canvas-wrapper h3 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #888;
+    margin-bottom: 8px;
+  }
+
+  .controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 8px;
+  }
+  button {
+    padding: 8px 18px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  button:hover { transform: translateY(-1px); }
+  button:active { transform: translateY(0); }
+  .btn-play { background: #0db5e0; color: #000; }
+  .btn-play:hover { background: #2ecaf0; }
+  .btn-add { background: #55a380; color: #fff; }
+  .btn-add:hover { background: #6ab892; }
+  .btn-reset { background: #e94560; color: #fff; }
+  .btn-reset:hover { background: #f06070; }
+  .btn-disabled { opacity: 0.4; pointer-events: none; }
+
+  .speed-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #aaa;
+  }
+  .speed-control input[type="range"] {
+    width: 80px;
+    accent-color: #0db5e0;
+  }
+
+  .psf-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #aaa;
+  }
+  .psf-control input[type="range"] {
+    width: 80px;
+    accent-color: #ffd60a;
+  }
+
+  .legend {
+    display: flex;
+    gap: 24px;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #ccc;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .legend-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .legend-ring {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 3px solid;
+    display: inline-block;
+  }
+</style>
+</head>
+<body>
+
+<h1>Photon Localization: How Accumulating Measurements Reduces Uncertainty</h1>
+<p class="subtitle">Each photon is detected at a random position drawn from the PSF — watch the estimated position converge</p>
+
+<div class="main-container">
+  <!-- Main 2D scatter plot -->
+  <div class="plot-column">
+    <div class="plot-area">
+      <canvas id="scatterCanvas"></canvas>
+    </div>
+    <div class="legend" style="margin-top: 8px;">
+      <div class="legend-item"><span class="legend-dot" style="background:#ffd60a;opacity:0.7;"></span> Detected photon</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#e94560;"></span> True position</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#0db5e0;"></span> Estimated mean</div>
+      <div class="legend-item"><span class="legend-ring" style="border-color:#e94560;"></span> 95% CI</div>
+    </div>
+    <div class="controls">
+      <button class="btn-play" id="btnPlay" onclick="togglePlay()">&#9654; Auto-add</button>
+      <button class="btn-add" onclick="addPhotons(1)">+1</button>
+      <button class="btn-add" onclick="addPhotons(10)">+10</button>
+      <button class="btn-add" onclick="addPhotons(100)">+100</button>
+      <button class="btn-reset" onclick="resetAll()">Reset</button>
+      <div class="speed-control">
+        <label>Speed:</label>
+        <input type="range" id="speedSlider" min="1" max="50" value="10">
+      </div>
+    </div>
+    <div class="controls" style="margin-top:4px;">
+      <div class="psf-control">
+        <label>PSF σ (nm):</label>
+        <input type="range" id="psfSlider" min="30" max="200" value="100" oninput="updatePSF()">
+        <span id="psfLabel">100</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Side panel with stats and convergence plot -->
+  <div class="side-panel">
+    <div class="stat-card">
+      <h3>Current State</h3>
+      <div class="stat-row">
+        <span class="stat-label">Photons detected:</span>
+        <span class="stat-value photons" id="statN">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Mean X:</span>
+        <span class="stat-value mean" id="statMeanX">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Mean Y:</span>
+        <span class="stat-value mean" id="statMeanY">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">95% CI radius:</span>
+        <span class="stat-value ci" id="statCI">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Loc. precision (σ/√N):</span>
+        <span class="stat-value precision" id="statPrec">—</span>
+      </div>
+    </div>
+
+    <div class="convergence-canvas-wrapper">
+      <h3>Localization Precision vs. Photon Count</h3>
+      <canvas id="convergenceCanvas" width="280" height="180"></canvas>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+const TRUE_X = 0;   // true position in nm
+const TRUE_Y = 0;
+let PSF_SIGMA = 100; // nm
+
+let photons = [];     // [{x, y}]
+let meanHistory = []; // [{n, meanX, meanY, ci}]
+let playing = false;
+let playInterval = null;
+
+// Plot range in nm
+const RANGE = 400; // -400 to +400
+
+// Canvas refs
+const scatterCvs = document.getElementById('scatterCanvas');
+const scatterCtx = scatterCvs.getContext('2d');
+const convCvs = document.getElementById('convergenceCanvas');
+const convCtx = convCvs.getContext('2d');
+
+// ============================================================
+// MATH HELPERS
+// ============================================================
+function randGauss() {
+  // Box-Muller
+  let u1 = Math.random(), u2 = Math.random();
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+
+function getStats() {
+  const n = photons.length;
+  if (n === 0) return { n: 0, meanX: 0, meanY: 0, ci: Infinity, precision: Infinity };
+  let sx = 0, sy = 0;
+  for (const p of photons) { sx += p.x; sy += p.y; }
+  const meanX = sx / n;
+  const meanY = sy / n;
+  // Standard error of mean
+  const sem = PSF_SIGMA / Math.sqrt(n);
+  const ci95 = 1.96 * sem;
+  return { n, meanX, meanY, ci: ci95, precision: sem };
+}
+
+// ============================================================
+// DRAWING: Scatter plot
+// ============================================================
+const SCATTER_MARGIN_L = 55;
+const SCATTER_MARGIN_R = 10;
+const SCATTER_MARGIN_T = 10;
+const SCATTER_MARGIN_B = 55;
+
+function nmToCanvasX(nmVal, W) {
+  const plotW = W - SCATTER_MARGIN_L - SCATTER_MARGIN_R;
+  return SCATTER_MARGIN_L + (nmVal + RANGE) / (2 * RANGE) * plotW;
+}
+function nmToCanvasY(nmVal, H) {
+  const plotH = H - SCATTER_MARGIN_T - SCATTER_MARGIN_B;
+  return SCATTER_MARGIN_T + (-nmVal + RANGE) / (2 * RANGE) * plotH; // flip Y
+}
+function nmToCanvasScaleX(nmVal, W) {
+  const plotW = W - SCATTER_MARGIN_L - SCATTER_MARGIN_R;
+  return nmVal / (2 * RANGE) * plotW;
+}
+
+function drawScatter() {
+  const W = scatterCvs.width, H = scatterCvs.height;
+  scatterCtx.clearRect(0, 0, W, H);
+
+  // Background
+  scatterCtx.fillStyle = '#1a1a2e';
+  scatterCtx.fillRect(0, 0, W, H);
+
+  const plotL = SCATTER_MARGIN_L;
+  const plotT = SCATTER_MARGIN_T;
+  const plotW = W - SCATTER_MARGIN_L - SCATTER_MARGIN_R;
+  const plotH = H - SCATTER_MARGIN_T - SCATTER_MARGIN_B;
+
+  // Grid
+  scatterCtx.strokeStyle = '#2a2a4a';
+  scatterCtx.lineWidth = 0.5;
+  scatterCtx.font = '18px system-ui';
+  scatterCtx.fillStyle = '#888';
+  const ticks = [-400, -300, -200, -100, 0, 100, 200, 300, 400];
+  for (const t of ticks) {
+    const cx = nmToCanvasX(t, W);
+    const cy = nmToCanvasY(t, H);
+    // vertical grid
+    scatterCtx.beginPath();
+    scatterCtx.moveTo(cx, plotT);
+    scatterCtx.lineTo(cx, plotT + plotH);
+    scatterCtx.stroke();
+    // horizontal grid
+    scatterCtx.beginPath();
+    scatterCtx.moveTo(plotL, cy);
+    scatterCtx.lineTo(plotL + plotW, cy);
+    scatterCtx.stroke();
+    // x labels (bottom)
+    if (t % 200 === 0) {
+      scatterCtx.textAlign = 'center';
+      scatterCtx.fillText(t + '', cx, plotT + plotH + 24);
+      // y labels (left)
+      scatterCtx.textAlign = 'right';
+      scatterCtx.fillText(t + '', plotL - 6, cy + 6);
+    }
+  }
+
+  // Axis labels
+  scatterCtx.fillStyle = '#ccc';
+  scatterCtx.font = 'bold 24px system-ui';
+  scatterCtx.textAlign = 'center';
+  scatterCtx.fillText('X (nm)', plotL + plotW / 2, H - 4);
+  scatterCtx.save();
+  scatterCtx.translate(16, plotT + plotH / 2);
+  scatterCtx.rotate(-Math.PI / 2);
+  scatterCtx.fillText('Y (nm)', 0, 0);
+  scatterCtx.restore();
+  scatterCtx.textAlign = 'left'; // reset
+
+  // PSF circle (1σ and 2σ) at true position
+  const trueCX = nmToCanvasX(TRUE_X, W);
+  const trueCY = nmToCanvasY(TRUE_Y, H);
+  const sig1px = nmToCanvasScaleX(PSF_SIGMA, W);
+  const sig2px = nmToCanvasScaleX(2 * PSF_SIGMA, W);
+
+  scatterCtx.strokeStyle = 'rgba(233, 69, 96, 0.2)';
+  scatterCtx.lineWidth = 2;
+  scatterCtx.setLineDash([6, 5]);
+  scatterCtx.beginPath();
+  scatterCtx.arc(trueCX, trueCY, sig1px, 0, 2 * Math.PI);
+  scatterCtx.stroke();
+  scatterCtx.beginPath();
+  scatterCtx.arc(trueCX, trueCY, sig2px, 0, 2 * Math.PI);
+  scatterCtx.stroke();
+  scatterCtx.setLineDash([]);
+
+  // PSF labels
+  scatterCtx.fillStyle = 'rgba(233, 69, 96, 0.4)';
+  scatterCtx.font = 'bold 16px system-ui';
+  scatterCtx.fillText('1σ PSF', trueCX + sig1px + 4, trueCY - 5);
+  scatterCtx.fillText('2σ PSF', trueCX + sig2px + 4, trueCY - 5);
+
+  // Draw photons
+  const maxVisible = 2000;
+  const startIdx = Math.max(0, photons.length - maxVisible);
+  for (let i = startIdx; i < photons.length; i++) {
+    const p = photons[i];
+    const px = nmToCanvasX(p.x, W);
+    const py = nmToCanvasY(p.y, H);
+    // fade older photons
+    const age = (photons.length - i) / Math.min(photons.length, maxVisible);
+    const alpha = 0.2 + 0.6 * (1 - age);
+    scatterCtx.fillStyle = `rgba(255, 214, 10, ${alpha})`;
+    scatterCtx.beginPath();
+    scatterCtx.arc(px, py, 5, 0, 2 * Math.PI);
+    scatterCtx.fill();
+  }
+
+  // Stats
+  const stats = getStats();
+
+  if (stats.n > 0) {
+    // 95% CI circle
+    const ciPx = nmToCanvasScaleX(stats.ci, W);
+    const meanCX = nmToCanvasX(stats.meanX, W);
+    const meanCY = nmToCanvasY(stats.meanY, H);
+
+    scatterCtx.strokeStyle = '#e94560';
+    scatterCtx.lineWidth = 4;
+    scatterCtx.beginPath();
+    scatterCtx.arc(meanCX, meanCY, ciPx, 0, 2 * Math.PI);
+    scatterCtx.stroke();
+
+    // CI label
+    scatterCtx.fillStyle = '#e94560';
+    scatterCtx.font = 'bold 18px system-ui';
+    if (ciPx > 15) {
+      scatterCtx.fillText('95% CI', meanCX + ciPx + 6, meanCY - 6);
+    }
+
+    // Mean position
+    scatterCtx.fillStyle = '#0db5e0';
+    scatterCtx.beginPath();
+    scatterCtx.arc(meanCX, meanCY, 9, 0, 2 * Math.PI);
+    scatterCtx.fill();
+    // crosshair
+    scatterCtx.strokeStyle = '#0db5e0';
+    scatterCtx.lineWidth = 2;
+    scatterCtx.beginPath();
+    scatterCtx.moveTo(meanCX - 16, meanCY);
+    scatterCtx.lineTo(meanCX + 16, meanCY);
+    scatterCtx.moveTo(meanCX, meanCY - 16);
+    scatterCtx.lineTo(meanCX, meanCY + 16);
+    scatterCtx.stroke();
+  }
+
+  // True position marker (red diamond)
+  scatterCtx.fillStyle = '#e94560';
+  scatterCtx.save();
+  scatterCtx.translate(trueCX, trueCY);
+  scatterCtx.rotate(Math.PI / 4);
+  scatterCtx.fillRect(-6, -6, 12, 12);
+  scatterCtx.restore();
+
+  // N counter in corner
+  scatterCtx.textAlign = 'left';
+  scatterCtx.fillStyle = '#ffd60a';
+  scatterCtx.font = 'bold 24px system-ui';
+  scatterCtx.fillText(`N = ${stats.n}`, plotL + 8, plotT + 28);
+}
+
+// ============================================================
+// DRAWING: Convergence plot (precision vs N)
+// ============================================================
+function drawConvergence() {
+  const W = convCvs.width, H = convCvs.height;
+  convCtx.clearRect(0, 0, W, H);
+  convCtx.fillStyle = '#12122a';
+  convCtx.fillRect(0, 0, W, H);
+
+  const margin = { l: 45, r: 10, t: 10, b: 30 };
+  const pw = W - margin.l - margin.r;
+  const ph = H - margin.t - margin.b;
+
+  // Axes
+  convCtx.strokeStyle = '#444';
+  convCtx.lineWidth = 1;
+  convCtx.beginPath();
+  convCtx.moveTo(margin.l, margin.t);
+  convCtx.lineTo(margin.l, margin.t + ph);
+  convCtx.lineTo(margin.l + pw, margin.t + ph);
+  convCtx.stroke();
+
+  // Axis labels
+  convCtx.fillStyle = '#888';
+  convCtx.font = '9px system-ui';
+  convCtx.fillText('Photon count (N)', margin.l + pw / 2 - 35, H - 3);
+  convCtx.save();
+  convCtx.translate(9, margin.t + ph / 2 + 30);
+  convCtx.rotate(-Math.PI / 2);
+  convCtx.fillText('95% CI radius (nm)', 0, 0);
+  convCtx.restore();
+
+  if (meanHistory.length === 0) {
+    convCtx.fillStyle = '#555';
+    convCtx.font = '11px system-ui';
+    convCtx.fillText('Add photons to see convergence', margin.l + 15, margin.t + ph / 2);
+    return;
+  }
+
+  const maxN = Math.max(10, meanHistory[meanHistory.length - 1].n);
+  const maxCI = Math.min(PSF_SIGMA * 2.5, meanHistory[0].ci);
+
+  function toX(n) { return margin.l + (n / maxN) * pw; }
+  function toY(ci) { return margin.t + (1 - ci / maxCI) * ph; }
+
+  // Theoretical curve: 1.96 * sigma / sqrt(N)
+  convCtx.strokeStyle = 'rgba(85, 163, 128, 0.5)';
+  convCtx.lineWidth = 1.5;
+  convCtx.setLineDash([4, 3]);
+  convCtx.beginPath();
+  for (let n = 1; n <= maxN; n += Math.max(1, maxN / 200)) {
+    const theorCI = 1.96 * PSF_SIGMA / Math.sqrt(n);
+    const x = toX(n);
+    const y = toY(Math.min(theorCI, maxCI));
+    if (n === 1) convCtx.moveTo(x, y);
+    else convCtx.lineTo(x, y);
+  }
+  convCtx.stroke();
+  convCtx.setLineDash([]);
+
+  // Measured data
+  convCtx.strokeStyle = '#e94560';
+  convCtx.lineWidth = 1.5;
+  convCtx.beginPath();
+  for (let i = 0; i < meanHistory.length; i++) {
+    const h = meanHistory[i];
+    const x = toX(h.n);
+    const y = toY(Math.min(h.ci, maxCI));
+    if (i === 0) convCtx.moveTo(x, y);
+    else convCtx.lineTo(x, y);
+  }
+  convCtx.stroke();
+
+  // Legend
+  convCtx.font = '8px system-ui';
+  convCtx.fillStyle = '#e94560';
+  convCtx.fillText('Measured', margin.l + pw - 80, margin.t + 12);
+  convCtx.fillStyle = 'rgba(85, 163, 128, 0.7)';
+  convCtx.fillText('Theory (1.96σ/√N)', margin.l + pw - 80, margin.t + 23);
+
+  // Tick labels
+  convCtx.fillStyle = '#666';
+  convCtx.font = '8px system-ui';
+  const nTicks = [1, Math.round(maxN / 4), Math.round(maxN / 2), maxN];
+  for (const n of nTicks) {
+    convCtx.fillText(n + '', toX(n) - 5, margin.t + ph + 12);
+  }
+  const ciTicks = [0, Math.round(maxCI / 2), Math.round(maxCI)];
+  for (const c of ciTicks) {
+    convCtx.fillText(c + '', margin.l - 22, toY(c) + 3);
+  }
+}
+
+// ============================================================
+// DATA LOGIC
+// ============================================================
+function addPhotons(count) {
+  for (let i = 0; i < count; i++) {
+    const x = TRUE_X + PSF_SIGMA * randGauss();
+    const y = TRUE_Y + PSF_SIGMA * randGauss();
+    photons.push({ x, y });
+
+    // Record history at key points
+    const n = photons.length;
+    if (n <= 20 || n % 5 === 0 || n % 50 === 0) {
+      const stats = getStats();
+      meanHistory.push({ n: stats.n, meanX: stats.meanX, meanY: stats.meanY, ci: stats.ci });
+    }
+  }
+  // Always record the final state
+  const stats = getStats();
+  const lastH = meanHistory[meanHistory.length - 1];
+  if (!lastH || lastH.n !== stats.n) {
+    meanHistory.push({ n: stats.n, meanX: stats.meanX, meanY: stats.meanY, ci: stats.ci });
+  }
+
+  updateUI();
+}
+
+function updateUI() {
+  const stats = getStats();
+  document.getElementById('statN').textContent = stats.n;
+  document.getElementById('statMeanX').textContent = stats.n > 0 ? stats.meanX.toFixed(1) + ' nm' : '—';
+  document.getElementById('statMeanY').textContent = stats.n > 0 ? stats.meanY.toFixed(1) + ' nm' : '—';
+  document.getElementById('statCI').textContent = stats.n > 0 ? stats.ci.toFixed(1) + ' nm' : '—';
+  document.getElementById('statPrec').textContent = stats.n > 0 ? stats.precision.toFixed(1) + ' nm' : '—';
+
+  drawScatter();
+  drawConvergence();
+}
+
+function resetAll() {
+  stopPlay();
+  photons = [];
+  meanHistory = [];
+  updateUI();
+}
+
+function updatePSF() {
+  PSF_SIGMA = parseInt(document.getElementById('psfSlider').value);
+  document.getElementById('psfLabel').textContent = PSF_SIGMA;
+  // Don't reset photons, but redraw (existing photons were from old sigma, which is fine pedagogically)
+  // Actually, let's reset to avoid confusion
+  resetAll();
+}
+
+// ============================================================
+// AUTO-PLAY
+// ============================================================
+function togglePlay() {
+  if (playing) stopPlay();
+  else startPlay();
+}
+
+function startPlay() {
+  playing = true;
+  document.getElementById('btnPlay').innerHTML = '&#9724; Pause';
+  document.getElementById('btnPlay').classList.remove('btn-play');
+  document.getElementById('btnPlay').style.background = '#e07020';
+  tick();
+}
+
+function stopPlay() {
+  playing = false;
+  document.getElementById('btnPlay').innerHTML = '&#9654; Auto-add';
+  document.getElementById('btnPlay').style.background = '';
+  document.getElementById('btnPlay').classList.add('btn-play');
+  if (playInterval) { clearTimeout(playInterval); playInterval = null; }
+}
+
+function tick() {
+  if (!playing) return;
+  const speed = parseInt(document.getElementById('speedSlider').value);
+  // Add 1-3 photons per tick depending on speed
+  const perTick = speed > 25 ? 3 : speed > 10 ? 2 : 1;
+  addPhotons(perTick);
+  const delay = Math.max(10, 800 - speed * 16);
+  playInterval = setTimeout(tick, delay);
+}
+
+// ============================================================
+// RESIZE
+// ============================================================
+function resizeScatter() {
+  const container = scatterCvs.parentElement;
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  // Keep it square, use the smaller dimension
+  const size = Math.max(300, Math.min(w, h));
+  // Set the actual pixel dimensions (not CSS)
+  scatterCvs.width = size;
+  scatterCvs.height = size;
+}
+
+// ============================================================
+// INIT
+// ============================================================
+// Use a ResizeObserver on the plot container so the canvas buffer
+// always matches the actual laid-out size — including the very first
+// callback, which fires after layout has settled. This avoids the
+// "too zoomed in on first load" glitch that happened when we sized
+// the canvas synchronously at parse time (before flexbox had a chance
+// to stretch the container past its min-height).
+const plotResizeObserver = new ResizeObserver(() => {
+  resizeScatter();
+  updateUI();
+});
+plotResizeObserver.observe(scatterCvs.parentElement);
+</script>
+</body>
+</html>

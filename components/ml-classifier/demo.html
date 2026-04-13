@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Interactive Classifier Demo — QI 2026</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #fafafa; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback, useMemo, useRef, useEffect } = React;
+
+// --- Logistic Regression ---
+function sigmoid(z) { return 1 / (1 + Math.exp(-Math.max(-500, Math.min(500, z)))); }
+
+function trainLogisticRegression(X, y, lr = 0.5, epochs = 500) {
+  const n = X.length;
+  if (n === 0) return { weights: [0, 0], bias: 0 };
+  const mx0 = X.reduce((s, x) => s + x[0], 0) / n;
+  const mx1 = X.reduce((s, x) => s + x[1], 0) / n;
+  const sx0 = Math.max(Math.sqrt(X.reduce((s, x) => s + (x[0] - mx0) ** 2, 0) / n), 1e-8);
+  const sx1 = Math.max(Math.sqrt(X.reduce((s, x) => s + (x[1] - mx1) ** 2, 0) / n), 1e-8);
+  const Xn = X.map(x => [(x[0] - mx0) / sx0, (x[1] - mx1) / sx1]);
+  let w = [0, 0], b = 0;
+  for (let e = 0; e < epochs; e++) {
+    let gw = [0, 0], gb = 0;
+    for (let i = 0; i < n; i++) {
+      const p = sigmoid(w[0] * Xn[i][0] + w[1] * Xn[i][1] + b);
+      const err = p - y[i];
+      gw[0] += err * Xn[i][0]; gw[1] += err * Xn[i][1]; gb += err;
+    }
+    w[0] -= lr * gw[0] / n; w[1] -= lr * gw[1] / n; b -= lr * gb / n;
+  }
+  return { weights: w, bias: b, mean: [mx0, mx1], std: [sx0, sx1] };
+}
+
+function predictLogistic(model, x) {
+  const xn = [(x[0] - model.mean[0]) / model.std[0], (x[1] - model.mean[1]) / model.std[1]];
+  return sigmoid(model.weights[0] * xn[0] + model.weights[1] * xn[1] + model.bias);
+}
+
+// --- Decision Tree ---
+function gini(y) {
+  if (y.length === 0) return 0;
+  const p = y.reduce((s, v) => s + v, 0) / y.length;
+  return 2 * p * (1 - p);
+}
+
+function buildTree(X, y, depth = 0, maxDepth = 6, minSamples = 3) {
+  const n = X.length;
+  const mean = y.reduce((s, v) => s + v, 0) / n;
+  if (depth >= maxDepth || n <= minSamples || gini(y) < 0.01) {
+    return { leaf: true, value: mean >= 0.5 ? 1 : 0, prob: mean };
+  }
+  let bestGain = -1, bestFeat = 0, bestThresh = 0;
+  for (let f = 0; f < 2; f++) {
+    const vals = [...new Set(X.map(x => x[f]))].sort((a, b) => a - b);
+    for (let i = 0; i < vals.length - 1; i++) {
+      const thresh = (vals[i] + vals[i + 1]) / 2;
+      const leftY = [], rightY = [];
+      for (let j = 0; j < n; j++) {
+        (X[j][f] <= thresh ? leftY : rightY).push(y[j]);
+      }
+      if (leftY.length < 2 || rightY.length < 2) continue;
+      const gain = gini(y) - (leftY.length * gini(leftY) + rightY.length * gini(rightY)) / n;
+      if (gain > bestGain) { bestGain = gain; bestFeat = f; bestThresh = thresh; }
+    }
+  }
+  if (bestGain <= 0) return { leaf: true, value: mean >= 0.5 ? 1 : 0, prob: mean };
+  const leftX = [], leftY = [], rightX = [], rightY = [];
+  for (let i = 0; i < n; i++) {
+    if (X[i][bestFeat] <= bestThresh) { leftX.push(X[i]); leftY.push(y[i]); }
+    else { rightX.push(X[i]); rightY.push(y[i]); }
+  }
+  return {
+    leaf: false, feature: bestFeat, threshold: bestThresh,
+    left: buildTree(leftX, leftY, depth + 1, maxDepth, minSamples),
+    right: buildTree(rightX, rightY, depth + 1, maxDepth, minSamples),
+  };
+}
+
+function predictTree(tree, x) {
+  if (tree.leaf) return tree.prob;
+  return x[tree.feature] <= tree.threshold ? predictTree(tree.left, x) : predictTree(tree.right, x);
+}
+
+function trainRandomForest(X, y, nTrees = 30, maxDepth = 5) {
+  const trees = [];
+  const n = X.length;
+  for (let t = 0; t < nTrees; t++) {
+    const idx = Array.from({ length: n }, () => Math.floor(Math.random() * n));
+    const Xb = idx.map(i => X[i]), yb = idx.map(i => y[i]);
+    trees.push(buildTree(Xb, yb, 0, maxDepth, 2));
+  }
+  return { trees };
+}
+
+function predictForest(model, x) {
+  return model.trees.reduce((s, t) => s + predictTree(t, x), 0) / model.trees.length;
+}
+
+// --- Data Generation ---
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    var t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function generateData(type, seed, totalSize, classPct) {
+  const rand = mulberry32(seed);
+  const randn = () => { let u = 0, v = 0; while (u === 0) u = rand(); while (v === 0) v = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  const points = [];
+  const nClass0 = Math.max(1, Math.round(totalSize * classPct / 100));
+  const nClass1 = Math.max(1, totalSize - nClass0);
+
+  if (type === "blobs") {
+    for (let i = 0; i < nClass0; i++) points.push({ x: randn() * 12 + 30, y: randn() * 12 + 65, label: 0 });
+    for (let i = 0; i < nClass1; i++) points.push({ x: randn() * 12 + 65, y: randn() * 12 + 35, label: 1 });
+  } else if (type === "moons") {
+    for (let i = 0; i < nClass0; i++) {
+      const a = Math.PI * rand();
+      points.push({ x: Math.cos(a) * 30 + 45 + randn() * 4, y: Math.sin(a) * 30 + 40 + randn() * 4, label: 0 });
+    }
+    for (let i = 0; i < nClass1; i++) {
+      const a = Math.PI + Math.PI * rand();
+      points.push({ x: Math.cos(a) * 30 + 55 + randn() * 4, y: Math.sin(a) * 30 + 60 + randn() * 4, label: 1 });
+    }
+  } else if (type === "circles") {
+    for (let i = 0; i < nClass0; i++) {
+      const a = rand() * 2 * Math.PI, r = 10 + randn() * 3;
+      points.push({ x: Math.cos(a) * r + 50, y: Math.sin(a) * r + 50, label: 0 });
+    }
+    for (let i = 0; i < nClass1; i++) {
+      const a = rand() * 2 * Math.PI, r = 28 + randn() * 3;
+      points.push({ x: Math.cos(a) * r + 50, y: Math.sin(a) * r + 50, label: 1 });
+    }
+  } else if (type === "cells") {
+    for (let i = 0; i < nClass0; i++) {
+      points.push({ x: 55 + randn() * 12, y: 25 + randn() * 10 + rand() * 10, label: 0 });
+    }
+    for (let i = 0; i < nClass1; i++) {
+      points.push({ x: 35 + randn() * 14, y: 60 + randn() * 12, label: 1 });
+    }
+  }
+  return points;
+}
+
+function splitData(points, ratio, seed) {
+  const rand = mulberry32(seed);
+  const shuffled = [...points].sort(() => rand() - 0.5);
+  const split = Math.floor(shuffled.length * ratio);
+  return { train: shuffled.slice(0, split), test: shuffled.slice(split) };
+}
+
+// --- Canvas Drawing ---
+const W = 500, H = 500;
+
+function drawBoundary(canvas, predictFn, model) {
+  if (!canvas || !model) return;
+  const ctx = canvas.getContext("2d");
+  const res = 3;
+  const imgData = ctx.createImageData(W, H);
+  for (let py = 0; py < H; py += res) {
+    for (let px = 0; px < W; px += res) {
+      const x = (px / W) * 100, y = 100 - (py / H) * 100;
+      const prob = predictFn(model, [x, y]);
+      const r0 = 160, g0 = 170, b0 = 185;
+      const r1 = 195, g1 = 75, b1 = 75;
+      const t = Math.max(0, Math.min(1, prob));
+      const r = Math.round(r0 + (r1 - r0) * t);
+      const g = Math.round(g0 + (g1 - g0) * t);
+      const b = Math.round(b0 + (b1 - b0) * t);
+      for (let dy = 0; dy < res && py + dy < H; dy++) {
+        for (let dx = 0; dx < res && px + dx < W; dx++) {
+          const idx = ((py + dy) * W + (px + dx)) * 4;
+          imgData.data[idx] = r; imgData.data[idx + 1] = g;
+          imgData.data[idx + 2] = b; imgData.data[idx + 3] = 100;
+        }
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+// --- Tree Layout & Visualization ---
+function treeSize(node) {
+  if (node.leaf) return { w: 1, h: 1 };
+  const l = treeSize(node.left), r = treeSize(node.right);
+  return { w: l.w + r.w, h: 1 + Math.max(l.h, r.h) };
+}
+
+function layoutTree(node, x, y, featureNames) {
+  const nodes = [], edges = [];
+  function walk(n, x, y, span) {
+    const cx = x + span / 2;
+    if (n.leaf) {
+      nodes.push({ x: cx, y, leaf: true, prob: n.prob, value: n.value });
+      return;
+    }
+    nodes.push({ x: cx, y, leaf: false, feature: n.feature, threshold: n.threshold, featureName: featureNames[n.feature] });
+    const lSize = treeSize(n.left), rSize = treeSize(n.right);
+    const total = lSize.w + rSize.w;
+    const lSpan = (lSize.w / total) * span;
+    const rSpan = (rSize.w / total) * span;
+    const lCx = x + lSpan / 2;
+    const rCx = x + lSpan + rSpan / 2;
+    edges.push({ x1: cx, y1: y, x2: lCx, y2: y + 1, labelLeft: true });
+    edges.push({ x1: cx, y1: y, x2: rCx, y2: y + 1, labelLeft: false });
+    walk(n.left, x, y + 1, lSpan);
+    walk(n.right, x + lSpan, y + 1, rSpan);
+  }
+  const size = treeSize(node);
+  walk(node, 0, 0, size.w);
+  return { nodes, edges, width: size.w, height: size.h };
+}
+
+function TreeDiagram({ tree, featureNames, width: containerW }) {
+  const layout = useMemo(() => layoutTree(tree, 0, 0, featureNames), [tree, featureNames]);
+  const nodeW = 110, nodeH = 32, gapY = 52;
+  const svgW = Math.max(containerW || 600, layout.width * (nodeW + 16));
+  const svgH = layout.height * (nodeH + gapY) + 20;
+  const scaleX = (x) => x * (svgW / layout.width);
+  const scaleY = (y) => y * (nodeH + gapY) + 16;
+
+  return (
+    <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+      <svg width={svgW} height={svgH} style={{ display: "block", minWidth: 300 }}>
+        {layout.edges.map((e, i) => (
+          <g key={"e" + i}>
+            <line
+              x1={scaleX(e.x1)} y1={scaleY(e.y1) + nodeH / 2}
+              x2={scaleX(e.x2)} y2={scaleY(e.y2)}
+              stroke="#bbb" strokeWidth={1.5}
+            />
+            <text
+              x={(scaleX(e.x1) + scaleX(e.x2)) / 2 + (e.labelLeft ? -10 : 10)}
+              y={(scaleY(e.y1) + nodeH / 2 + scaleY(e.y2)) / 2 - 4}
+              textAnchor="middle" fill="#aaa" fontSize={10}
+            >
+              {e.labelLeft ? "≤" : ">"}
+            </text>
+          </g>
+        ))}
+        {layout.nodes.map((n, i) => {
+          const px = scaleX(n.x) - nodeW / 2, py = scaleY(n.y);
+          if (n.leaf) {
+            const clr = n.value === 1 ? "#8B3A3A" : "#7a8a9a";
+            return (
+              <g key={"n" + i}>
+                <rect x={px} y={py} width={nodeW} height={nodeH} rx={6} fill={clr} fillOpacity={0.15} stroke={clr} strokeWidth={1.5} />
+                <text x={scaleX(n.x)} y={py + nodeH / 2 + 4} textAnchor="middle" fontSize={11} fill={clr} fontWeight={600}>
+                  Class {n.value} ({(n.prob * 100).toFixed(0)}%)
+                </text>
+              </g>
+            );
+          }
+          return (
+            <g key={"n" + i}>
+              <rect x={px} y={py} width={nodeW} height={nodeH} rx={6} fill="white" stroke="#ccc" strokeWidth={1.5} />
+              <text x={scaleX(n.x)} y={py + 13} textAnchor="middle" fontSize={10} fill="#888">{n.featureName}</text>
+              <text x={scaleX(n.x)} y={py + 26} textAnchor="middle" fontSize={11} fill="#444" fontWeight={600}>≤ {n.threshold.toFixed(1)}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// --- Main Component ---
+function MLClassifierDemo() {
+  const [dataset, setDataset] = useState("cells");
+  const [modelType, setModelType] = useState("logistic");
+  const [trained, setTrained] = useState(false);
+  const [model, setModel] = useState(null);
+  const [showTest, setShowTest] = useState(false);
+  const [showTrain, setShowTrain] = useState(true);
+  const [trainAcc, setTrainAcc] = useState(null);
+  const [testAcc, setTestAcc] = useState(null);
+  const [splitRatio, setSplitRatio] = useState(0.7);
+  const [maxDepth, setMaxDepth] = useState(4);
+  const [seed, setSeed] = useState(42);
+  const [totalSize, setTotalSize] = useState(80);
+  const [sizeInput, setSizeInput] = useState("80");
+  const [classBalance, setClassBalance] = useState(50);
+  const [selectedTree, setSelectedTree] = useState(0);
+  const canvasRef = useRef(null);
+
+  const handleReset = useCallback(() => {
+    setTrained(false); setModel(null);
+    setTrainAcc(null); setTestAcc(null); setSelectedTree(0);
+    const canvas = canvasRef.current;
+    if (canvas) canvas.getContext("2d").clearRect(0, 0, W, H);
+  }, []);
+
+  const clampSize = (v) => Math.max(10, Math.min(1000, Math.round(v)));
+  const handleSizeSlider = (v) => { const s = clampSize(v); setTotalSize(s); setSizeInput(String(s)); handleReset(); };
+  const handleSizeInput = (raw) => {
+    setSizeInput(raw);
+    const v = parseInt(raw, 10);
+    if (!isNaN(v)) { const s = clampSize(v); setTotalSize(s); handleReset(); }
+  };
+  const handleSizeBlur = () => { setSizeInput(String(totalSize)); };
+
+  const points = useMemo(() => generateData(dataset, seed, totalSize, classBalance), [dataset, seed, totalSize, classBalance]);
+  const { train, test } = useMemo(() => splitData(points, splitRatio, seed + 7), [points, splitRatio, seed]);
+
+  const predictFn = modelType === "logistic" ? predictLogistic : predictForest;
+
+  const handleTrain = useCallback(() => {
+    const X = train.map(p => [p.x, p.y]);
+    const y = train.map(p => p.label);
+    let m;
+    if (modelType === "logistic") {
+      m = trainLogisticRegression(X, y, 1.0, 800);
+    } else {
+      m = trainRandomForest(X, y, 30, maxDepth);
+    }
+    setModel(m);
+    setTrained(true);
+    const pFn = modelType === "logistic" ? predictLogistic : predictForest;
+    const trAcc = train.reduce((s, p) => s + ((pFn(m, [p.x, p.y]) >= 0.5 ? 1 : 0) === p.label ? 1 : 0), 0) / train.length;
+    const teAcc = test.reduce((s, p) => s + ((pFn(m, [p.x, p.y]) >= 0.5 ? 1 : 0) === p.label ? 1 : 0), 0) / test.length;
+    setTrainAcc(trAcc);
+    setTestAcc(teAcc);
+  }, [train, test, modelType, maxDepth]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, W, H);
+    if (trained && model) {
+      drawBoundary(canvas, predictFn, model);
+    }
+  }, [trained, model, predictFn]);
+
+  const toSvg = (p) => ({ cx: (p.x / 100) * W, cy: H - (p.y / 100) * H });
+
+  const datasetLabels = {
+    cells: ["Interphase", "Dividing"],
+    blobs: ["Class A", "Class B"],
+    moons: ["Class A", "Class B"],
+    circles: ["Inner", "Outer"],
+  };
+  const axisLabels = {
+    cells: ["Circularity (Feature 1)", "Intensity (Feature 2)"],
+    blobs: ["Feature 1", "Feature 2"],
+    moons: ["Feature 1", "Feature 2"],
+    circles: ["Feature 1", "Feature 2"],
+  };
+
+  const labels = datasetLabels[dataset];
+  const axes = axisLabels[dataset];
+  const visiblePoints = [...(showTrain ? train : []), ...(showTest ? test : [])];
+
+  // Shared styles
+  const card = { background: "white", borderRadius: 8, padding: "12px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" };
+  const sliderRow = { ...card, display: "flex", alignItems: "center", gap: 12 };
+  const lbl = { fontSize: 12, color: "#777" };
+  const val = { fontSize: 13, color: "#555", fontVariantNumeric: "tabular-nums" };
+
+  return (
+    <div style={{ fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif", maxWidth: 960, margin: "0 auto", padding: 24, background: "#fafafa" }}>
+      <h1 style={{ fontSize: 26, fontWeight: 300, color: "#333", marginBottom: 4, letterSpacing: "0.02em" }}>
+        INTERACTIVE CLASSIFIER DEMO
+      </h1>
+      <p style={{ color: "#888", fontSize: 14, marginBottom: 24, fontWeight: 300 }}>
+        Explore how different models draw decision boundaries in feature space
+      </p>
+
+      {/* Controls */}
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
+        <div style={{ ...card, flex: "1 1 auto", minWidth: 200 }}>
+          <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#999", display: "block", marginBottom: 6 }}>Dataset</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[["cells", "Cell Classification"], ["blobs", "Two Clusters"], ["moons", "Moons"], ["circles", "Concentric"]].map(([k, v]) => (
+              <button key={k} onClick={() => { setDataset(k); handleReset(); }}
+                style={{
+                  padding: "6px 12px", borderRadius: 6, border: "1px solid " + (dataset === k ? "#8B3A3A" : "#ddd"),
+                  background: dataset === k ? "#8B3A3A" : "white", color: dataset === k ? "white" : "#555",
+                  fontSize: 13, cursor: "pointer", fontWeight: dataset === k ? 500 : 400, transition: "all 0.15s"
+                }}>
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ ...card, flex: "1 1 auto", minWidth: 200 }}>
+          <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#999", display: "block", marginBottom: 6 }}>Model</label>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[["logistic", "Logistic Regression"], ["forest", "Random Forest"]].map(([k, v]) => (
+              <button key={k} onClick={() => { setModelType(k); handleReset(); }}
+                style={{
+                  padding: "6px 12px", borderRadius: 6, border: "1px solid " + (modelType === k ? "#D4890A" : "#ddd"),
+                  background: modelType === k ? "#D4890A" : "white", color: modelType === k ? "white" : "#555",
+                  fontSize: 13, cursor: "pointer", fontWeight: modelType === k ? 500 : 400, transition: "all 0.15s"
+                }}>
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Parameters row */}
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
+        <div style={sliderRow}>
+          <label style={lbl}>Train/Test Split:</label>
+          <input type="range" min="0.5" max="0.9" step="0.05" value={splitRatio}
+            onChange={e => { setSplitRatio(+e.target.value); handleReset(); }}
+            style={{ width: 100 }} />
+          <span style={{ ...val, minWidth: 65 }}>
+            {Math.round(splitRatio * 100)}% / {Math.round((1 - splitRatio) * 100)}%
+          </span>
+        </div>
+
+        {modelType === "forest" && (
+          <div style={sliderRow}>
+            <label style={lbl}>Max Tree Depth:</label>
+            <input type="range" min="1" max="8" step="1" value={maxDepth}
+              onChange={e => { setMaxDepth(+e.target.value); handleReset(); }}
+              style={{ width: 80 }} />
+            <span style={val}>{maxDepth}</span>
+          </div>
+        )}
+
+        <div style={sliderRow}>
+          <label style={lbl}>Dataset Size:</label>
+          <input type="range" min="10" max="1000" step="10" value={totalSize}
+            onChange={e => handleSizeSlider(+e.target.value)}
+            style={{ width: 120 }} />
+          <input type="text" value={sizeInput}
+            onChange={e => handleSizeInput(e.target.value)}
+            onBlur={handleSizeBlur}
+            onKeyDown={e => { if (e.key === "Enter") { e.target.blur(); } }}
+            style={{
+              width: 52, padding: "3px 6px", borderRadius: 4, border: "1px solid #ccc",
+              fontSize: 13, textAlign: "center", fontVariantNumeric: "tabular-nums", color: "#555",
+              outline: "none"
+            }} />
+        </div>
+
+        <div style={sliderRow}>
+          <label style={lbl}>Class Balance:</label>
+          <input type="range" min="50" max="95" step="5" value={classBalance}
+            onChange={e => { setClassBalance(+e.target.value); handleReset(); }}
+            style={{ width: 100 }} />
+          <span style={{ ...val, minWidth: 55 }}>
+            {classBalance}:{100 - classBalance}
+          </span>
+        </div>
+
+        <div style={sliderRow}>
+          <label style={lbl}>Random Seed:</label>
+          <input type="range" min="1" max="200" step="1" value={seed}
+            onChange={e => { setSeed(+e.target.value); handleReset(); }}
+            style={{ width: 80 }} />
+          <span style={val}>{seed}</span>
+        </div>
+      </div>
+
+      {/* Main visualization area */}
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+        {/* Plot */}
+        <div style={{ position: "relative", background: "white", borderRadius: 10, boxShadow: "0 2px 8px rgba(0,0,0,0.08)", padding: "16px 16px 8px 8px", flex: "1 1 500px" }}>
+          <div style={{
+            position: "absolute", left: -4, top: "50%", transform: "rotate(-90deg) translateX(-50%)",
+            fontSize: 12, color: "#999", letterSpacing: "0.04em", transformOrigin: "center center", whiteSpace: "nowrap"
+          }}>
+            {axes[1]}
+          </div>
+          <div style={{ marginLeft: 24, position: "relative" }}>
+            <svg width={W} height={H} style={{ display: "block", borderRadius: 6, border: "1px solid #eee", background: "#f7f7f7" }}>
+              <foreignObject x={0} y={0} width={W} height={H}>
+                <canvas ref={canvasRef} width={W} height={H} style={{ width: W, height: H }} />
+              </foreignObject>
+              {[0, 25, 50, 75, 100].map(v => {
+                const px = (v / 100) * W, py = H - (v / 100) * H;
+                return (
+                  <g key={v}>
+                    <line x1={px} y1={0} x2={px} y2={H} stroke="#e8e8e8" strokeWidth={0.5} />
+                    <line x1={0} y1={py} x2={W} y2={py} stroke="#e8e8e8" strokeWidth={0.5} />
+                  </g>
+                );
+              })}
+              {visiblePoints.map((p, i) => {
+                const { cx, cy } = toSvg(p);
+                const isTest = showTest && test.includes(p);
+                const fill = p.label === 1 ? "#8B3A3A" : "#7a8a9a";
+                return (
+                  <g key={i}>
+                    <circle cx={cx} cy={cy} r={isTest ? 7 : 6.5}
+                      fill={fill} fillOpacity={isTest ? 0.3 : 0.85}
+                      stroke={isTest ? fill : "white"} strokeWidth={isTest ? 2.5 : 1.5} />
+                  </g>
+                );
+              })}
+            </svg>
+            <div style={{ textAlign: "center", fontSize: 12, color: "#999", marginTop: 6, letterSpacing: "0.04em" }}>
+              {axes[0]}
+            </div>
+          </div>
+        </div>
+
+        {/* Side panel */}
+        <div style={{ flex: "0 0 220px", display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* Legend */}
+          <div style={{ ...card, padding: 16 }}>
+            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#999", marginBottom: 10 }}>Legend</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <svg width={16} height={16}><circle cx={8} cy={8} r={6} fill="#8B3A3A" stroke="white" strokeWidth={1.5} /></svg>
+              <span style={{ fontSize: 13, color: "#555" }}>{labels[1]} (train)</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <svg width={16} height={16}><circle cx={8} cy={8} r={6} fill="#7a8a9a" stroke="white" strokeWidth={1.5} /></svg>
+              <span style={{ fontSize: 13, color: "#555" }}>{labels[0]} (train)</span>
+            </div>
+            {showTest && <>
+              <div style={{ borderTop: "1px solid #eee", margin: "8px 0" }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <svg width={16} height={16}><circle cx={8} cy={8} r={6} fill="transparent" stroke="#8B3A3A" strokeWidth={2.5} /></svg>
+                <span style={{ fontSize: 13, color: "#555" }}>{labels[1]} (test)</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg width={16} height={16}><circle cx={8} cy={8} r={6} fill="transparent" stroke="#7a8a9a" strokeWidth={2.5} /></svg>
+                <span style={{ fontSize: 13, color: "#555" }}>{labels[0]} (test)</span>
+              </div>
+            </>}
+          </div>
+
+          {/* Data info */}
+          <div style={{ ...card, padding: 16 }}>
+            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#999", marginBottom: 10 }}>Data</div>
+            <div style={{ fontSize: 13, color: "#555", lineHeight: 1.8 }}>
+              <div>Total: <strong>{points.length}</strong> points</div>
+              <div>Training: <strong>{train.length}</strong> points ({Math.round(splitRatio * 100)}%)</div>
+              <div>Test: <strong>{test.length}</strong> points ({Math.round((1 - splitRatio) * 100)}%)</div>
+            </div>
+          </div>
+
+          {/* Show/hide train toggle */}
+          <div style={{ ...card, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+            onClick={() => setShowTrain(!showTrain)}>
+            <div style={{
+              width: 36, height: 20, borderRadius: 10, padding: 2,
+              background: showTrain ? "#8B3A3A" : "#ccc", transition: "background 0.2s",
+              display: "flex", alignItems: "center",
+              justifyContent: showTrain ? "flex-end" : "flex-start"
+            }}>
+              <div style={{ width: 16, height: 16, borderRadius: 8, background: "white", transition: "all 0.2s" }} />
+            </div>
+            <span style={{ fontSize: 13, color: "#555", userSelect: "none" }}>Show train data</span>
+          </div>
+
+          {/* Show/hide test toggle */}
+          <div style={{ ...card, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+            onClick={() => setShowTest(!showTest)}>
+            <div style={{
+              width: 36, height: 20, borderRadius: 10, padding: 2,
+              background: showTest ? "#8B3A3A" : "#ccc", transition: "background 0.2s",
+              display: "flex", alignItems: "center",
+              justifyContent: showTest ? "flex-end" : "flex-start"
+            }}>
+              <div style={{ width: 16, height: 16, borderRadius: 8, background: "white", transition: "all 0.2s" }} />
+            </div>
+            <span style={{ fontSize: 13, color: "#555", userSelect: "none" }}>Show test data</span>
+          </div>
+
+          {/* Train button */}
+          <button onClick={handleTrain}
+            style={{
+              padding: "12px 16px", borderRadius: 8, border: "none", cursor: "pointer",
+              background: "linear-gradient(135deg, #D4890A, #c07808)", color: "white",
+              fontSize: 14, fontWeight: 600, letterSpacing: "0.02em",
+              boxShadow: "0 2px 6px rgba(212,137,10,0.3)", transition: "all 0.15s"
+            }}>
+            Train Model
+          </button>
+
+          {/* Accuracy */}
+          {trained && (
+            <div style={{ ...card, padding: 16 }}>
+              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#999", marginBottom: 10 }}>Performance</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <span style={{ fontSize: 13, color: "#666" }}>Train Accuracy</span>
+                <span style={{ fontSize: 16, fontWeight: 600, color: "#333", fontVariantNumeric: "tabular-nums" }}>
+                  {(trainAcc * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 13, color: "#666" }}>Test Accuracy</span>
+                <span style={{ fontSize: 16, fontWeight: 600, color: "#333", fontVariantNumeric: "tabular-nums" }}>
+                  {(testAcc * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div style={{ borderTop: "1px solid #eee", marginTop: 12, paddingTop: 10, fontSize: 12, color: "#aaa" }}>
+                {modelType === "logistic" ? "Logistic Regression" : "Random Forest (depth " + maxDepth + ")"}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Model Visualization */}
+      {trained && model && (
+        <div style={{ marginTop: 20, background: "white", borderRadius: 10, padding: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.08)" }}>
+          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#999", marginBottom: 16 }}>
+            Trained Model — {modelType === "logistic" ? "Logistic Regression" : "Random Forest"}
+          </div>
+
+          {modelType === "logistic" && (
+            <div>
+              <div style={{ fontSize: 14, color: "#444", marginBottom: 12 }}>
+                <strong>Decision function:</strong>{" "}
+                <span style={{ fontFamily: "monospace", fontSize: 13, background: "#f5f5f5", padding: "3px 8px", borderRadius: 4 }}>
+                  P(class = 1) = σ(w₁·x₁' + w₂·x₂' + b)
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 12 }}>
+                <div style={{ background: "#f8f8f8", borderRadius: 6, padding: "10px 16px", minWidth: 140 }}>
+                  <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Weights (normalized)</div>
+                  <div style={{ fontFamily: "monospace", fontSize: 14, color: "#444" }}>
+                    w₁ = {model.weights[0].toFixed(4)}
+                  </div>
+                  <div style={{ fontFamily: "monospace", fontSize: 14, color: "#444" }}>
+                    w₂ = {model.weights[1].toFixed(4)}
+                  </div>
+                </div>
+                <div style={{ background: "#f8f8f8", borderRadius: 6, padding: "10px 16px", minWidth: 100 }}>
+                  <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Bias</div>
+                  <div style={{ fontFamily: "monospace", fontSize: 14, color: "#444" }}>
+                    b = {model.bias.toFixed(4)}
+                  </div>
+                </div>
+                <div style={{ background: "#f8f8f8", borderRadius: 6, padding: "10px 16px", minWidth: 160 }}>
+                  <div style={{ fontSize: 10, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Feature normalization</div>
+                  <div style={{ fontFamily: "monospace", fontSize: 13, color: "#666" }}>
+                    {axes[0]}: μ={model.mean[0].toFixed(1)}, σ={model.std[0].toFixed(1)}
+                  </div>
+                  <div style={{ fontFamily: "monospace", fontSize: 13, color: "#666" }}>
+                    {axes[1]}: μ={model.mean[1].toFixed(1)}, σ={model.std[1].toFixed(1)}
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: "#888", lineHeight: 1.6 }}>
+                The model normalizes each feature to zero mean and unit variance, then applies the linear weights.
+                The boundary is drawn where the predicted probability equals 50%. Because the model is linear in the
+                (normalized) feature space, the decision boundary is always a straight line.
+              </div>
+            </div>
+          )}
+
+          {modelType === "forest" && model.trees && (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, color: "#555" }}>Viewing tree:</span>
+                <button
+                  onClick={() => setSelectedTree(Math.max(0, selectedTree - 1))}
+                  disabled={selectedTree === 0}
+                  style={{
+                    padding: "4px 10px", borderRadius: 4, border: "1px solid #ddd", background: "white",
+                    cursor: selectedTree === 0 ? "default" : "pointer", opacity: selectedTree === 0 ? 0.4 : 1,
+                    fontSize: 13, color: "#555"
+                  }}
+                >◀ Prev</button>
+                <span style={{ fontFamily: "monospace", fontSize: 14, fontWeight: 600, color: "#444", minWidth: 60, textAlign: "center" }}>
+                  {selectedTree + 1} / {model.trees.length}
+                </span>
+                <button
+                  onClick={() => setSelectedTree(Math.min(model.trees.length - 1, selectedTree + 1))}
+                  disabled={selectedTree === model.trees.length - 1}
+                  style={{
+                    padding: "4px 10px", borderRadius: 4, border: "1px solid #ddd", background: "white",
+                    cursor: selectedTree === model.trees.length - 1 ? "default" : "pointer",
+                    opacity: selectedTree === model.trees.length - 1 ? 0.4 : 1,
+                    fontSize: 13, color: "#555"
+                  }}
+                >Next ▶</button>
+                <span style={{ fontSize: 12, color: "#aaa" }}>
+                  (max depth: {maxDepth} · {model.trees.length} trees in ensemble)
+                </span>
+              </div>
+              <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, background: "#fafafa" }}>
+                <TreeDiagram tree={model.trees[selectedTree]} featureNames={axes} />
+              </div>
+              <div style={{ fontSize: 12, color: "#888", marginTop: 12, lineHeight: 1.6 }}>
+                Each tree was trained on a bootstrap sample (random sample with replacement) of the training data.
+                At each node, the tree splits on the feature and threshold that best separates the classes (lowest Gini impurity).
+                The final prediction is the average of all {model.trees.length} trees — this ensemble averaging is what makes
+                random forests more stable than individual decision trees.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Teaching notes */}
+      <div style={{ marginTop: 20, background: "white", borderRadius: 8, padding: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.08)", borderLeft: "3px solid #D4890A" }}>
+        <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "#D4890A", marginBottom: 8 }}>Things to try</div>
+        <div style={{ fontSize: 13, color: "#666", lineHeight: 1.7 }}>
+          <strong>Linear vs. nonlinear boundaries:</strong> Train logistic regression on the "Concentric" dataset — it can't separate the classes. Now try Random Forest.
+          {" "}<strong>Overfitting:</strong> Set Random Forest max depth to 8 with few training points — watch the jagged boundary and the train/test accuracy gap.
+          {" "}<strong>Underfitting:</strong> Set max depth to 1 on any dataset — the model is too simple.
+          {" "}<strong>Dataset size matters:</strong> Slide down to 10–20 points and watch the boundary become erratic. Slide up to 500+ and see it stabilize. Compare the train/test accuracy gap at each size.
+          {" "}<strong>Class imbalance:</strong> Push the class balance to 90:10 or 95:5 — what happens to accuracy? Is the model actually good, or is it just predicting the majority class?
+          {" "}<strong>Stability:</strong> At small dataset sizes, change the random seed and retrain — how much does the boundary move? Now try the same at 500 points.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<MLClassifierDemo />);
+</script>
+</body>
+</html>

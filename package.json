@@ -4,7 +4,7 @@
   "description": "Interactive web components for microscopy education",
   "type": "module",
   "scripts": {
-    "dev": "python -m http.server 8000"
+    "dev": "uv run python -m http.server 8000"
   },
   "keywords": [
     "microscopy",
