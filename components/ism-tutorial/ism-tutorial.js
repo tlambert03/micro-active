@@ -324,6 +324,7 @@ function drawPlot(ctx, rect, curves, options) {
 
   // Curves
   for (const curve of curves) {
+    if (curve.legendOnly) continue;
     ctx.strokeStyle = curve.color;
     ctx.lineWidth = curve.lineWidth || 2;
     ctx.setLineDash(curve.dash || []);
@@ -427,6 +428,7 @@ class IsmTutorial extends LitElement {
     beamPos: { type: Number, attribute: 'beam-pos' },
     pinholeSize4: { type: Number, attribute: 'pinhole-size-4' },
     pinholeOffset4: { type: Number, attribute: 'pinhole-offset-4' },
+    stokesShift4: { type: Number, attribute: 'stokes-shift-4' },
     selectedElement: { type: Number, attribute: 'selected-element' },
     showReassignment: { type: Boolean, attribute: 'show-reassignment' },
     _reassignProgress: { state: true },
@@ -613,6 +615,7 @@ class IsmTutorial extends LitElement {
     this.beamPos = -0.4;
     this.pinholeSize4 = 0.5;
     this.pinholeOffset4 = 0;
+    this.stokesShift4 = 60;
     this.selectedElement = -1; // -1 = all
     this._lastSingleElement = 0;
     this.showReassignment = false;
@@ -1395,6 +1398,13 @@ class IsmTutorial extends LitElement {
     const pinCenter = beamPos + phOffset;
     const norm = this.normalized;
 
+    // Emission PSF scaling from Stokes shift. Airy-disc first zero
+    // scales linearly with wavelength, so emission AU = (λ_em/λ_exc) × exc AU.
+    // We baseline λ_exc at 488 nm for the display.
+    const lambdaExc = 488;
+    const emScale = (lambdaExc + this.stokesShift4) / lambdaExc;
+    const airyEm = (r) => airyDisk(r / emScale);
+
     // Excitation beam: Airy disc centered at scan position
     const excBeam = new Float64Array(n);
     for (let i = 0; i < n; i++) excBeam[i] = airyDisk(grid[i] - beamPos);
@@ -1404,7 +1414,7 @@ class IsmTutorial extends LitElement {
 
     // Emission PSF: centered at the emitter, scaled by excitation there
     const emissionPSF = new Float64Array(n);
-    for (let i = 0; i < n; i++) emissionPSF[i] = airyDisk(grid[i]) * excAtEmitter;
+    for (let i = 0; i < n; i++) emissionPSF[i] = airyEm(grid[i]) * excAtEmitter;
 
     // Static effective PSF with optional pinhole offset D:
     //   I_eff(x_s) = h_exc(x_s) · (h_det ⊛ P)(x_s + D)
@@ -1419,7 +1429,8 @@ class IsmTutorial extends LitElement {
     // factor is re-applied below only for unnormalized display, so that the
     // absolute effective PSF still vanishes as phSize → 0.
     const excStatic = airyDiskArray(grid);
-    const detStatic = airyDiskArray(grid);
+    const detStatic = new Float64Array(n);
+    for (let i = 0; i < n; i++) detStatic[i] = airyEm(grid[i]);
     // Total emission integral over the simulation grid. We divide the
     // effective PSF by this so the y-axis has a consistent "intensity"
     // interpretation across all curves: effPSF represents excitation ×
@@ -1519,6 +1530,8 @@ class IsmTutorial extends LitElement {
       { data: excBeam, color: '#5599ff', lineWidth: 1.5, label: 'Excitation beam' },
       { data: emissionPSF, color: '#ff7766', lineWidth: 2, label: 'Emission PSF' },
       { data: plotEff, color: '#66ff99', lineWidth: 2.5, dash: [6, 4], label: 'Effective PSF' },
+      { legendOnly: true, color: 'rgba(255,200,150,0.85)', lineWidth: 1,
+        dash: [4, 4], label: 'Pinhole' },
     ];
 
     drawPlot(ctx, rect, curves, {
@@ -1797,11 +1810,19 @@ class IsmTutorial extends LitElement {
             @sl-input=${(e) => { this.pinholeOffset4 = parseFloat(e.target.value); }}></sl-range>
           <span class="value">${this.pinholeOffset4.toFixed(2)} AU</span>
         </div>
+        <div class="control-group" style="width: 100%;">
+          <label>Stokes shift</label>
+          <sl-range min="0" max="200" step="1"
+            value=${this.stokesShift4}
+            @sl-input=${(e) => { this.stokesShift4 = parseFloat(e.target.value); }}></sl-range>
+          <span class="value">${this.stokesShift4.toFixed(0)} nm</span>
+        </div>
       </div>
       <div class="info-bar">
         <span>Beam: <span class="highlight">${this.beamPos.toFixed(2)} AU</span></span>
         <span>Pinhole offset: <span class="highlight">${this.pinholeOffset4.toFixed(2)} AU</span></span>
         <span>Pinhole size: <span class="highlight">${this.pinholeSize4 === 0 ? 'point' : this.pinholeSize4.toFixed(2) + ' AU'}</span></span>
+        <span>Stokes shift: <span class="highlight">${this.stokesShift4.toFixed(0)} nm (λ_em/λ_exc = ${((488 + this.stokesShift4) / 488).toFixed(3)})</span></span>
         <span>Excitation at emitter: <span class="highlight">${airyDisk(this.beamPos).toFixed(3)}</span></span>
       </div>
     `;
